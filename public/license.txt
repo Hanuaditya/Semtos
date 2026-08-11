@@ -1,0 +1,11 @@
+Model Information:
+* title:	ESEC Traffic Project
+* source:	https://sketchfab.com/3d-models/esec-traffic-project-ab0652f07a9947a9a4b5c6c8712a9ef6
+* author:	dharandev18.6.05 (https://sketchfab.com/dharandev18.6.05)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "ESEC Traffic Project" (https://sketchfab.com/3d-models/esec-traffic-project-ab0652f07a9947a9a4b5c6c8712a9ef6) by dharandev18.6.05 (https://sketchfab.com/dharandev18.6.05) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
