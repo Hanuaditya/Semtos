@@ -1,159 +1,130 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { io } from 'socket.io-client';
+
+// Ambulance starts far West on the main avenue and drives East (along +X).
+const AMB_START_X      = -120;
+const AMB_LANE_Z       =  -6.0;  // East-bound lane centre Z
+const AMB_SPEED_DX     =   0.6;  // units per 50 ms tick (~12 u/s)
+const AMB_WRAP_X       =  150;
+const AVE_ENTRY_X      =  -85;   // fires W_GREEN signal
+const CLEARED_X        =   15;   // fires N_RELEASE sequential sequence
 
 export function useTrafficStream(useMockData = true) {
   const [state, setState] = useState({
-    // Start off-screen on the side street facing down the Z axis
-    ambulancePosition: { x: -85, y: 0.5, z: -40, rotation: 0 },
-    distanceToIntersection: 2000,
-    isPreempted: false,
-    flushDuration: 12,
-    systemStatus: 'NOMINAL',
-    signalState: 'RED',
-    manualOverride: false,
+    ambulancePosition: { x: AMB_START_X, y: 0.5, z: AMB_LANE_Z, rotation: -Math.PI / 2 },
+    isSimulationRunning: false,
+    isFrozen: false,
     auditLogs: [],
   });
 
-  const [isSimulationRunning, setIsSimulationRunning] = useState(false);
-  const stateRef = useRef(state);
-  const simulationRunningRef = useRef(isSimulationRunning);
+  const simRunningRef        = useRef(false);
+  const isFrozenRef          = useRef(false);
+  const onAvenueCallbackRef  = useRef(null);
+  const onClearedCallbackRef = useRef(null);
+  const avenueEventFiredRef  = useRef(false);
+  const clearedEventFiredRef = useRef(false);
+  const xRef                 = useRef(AMB_START_X);
 
-  useEffect(() => {
-    simulationRunningRef.current = isSimulationRunning;
-  }, [isSimulationRunning]);
+  const update = useCallback((patch) => {
+    setState(prev => ({ ...prev, ...patch }));
+  }, []);
 
-  const updateState = useCallback((newState) => {
-    setState((prev) => {
-      const updated = { ...prev, ...newState };
-      stateRef.current = updated;
-      return updated;
+  const addLog = useCallback((msg) => {
+    setState(prev => {
+      const logs = [...prev.auditLogs, {
+        id: Date.now() + Math.random(),
+        timestamp: '[' + new Date().toTimeString().split(' ')[0] + ']',
+        message: msg,
+      }];
+      if (logs.length > 50) logs.shift();
+      return { ...prev, auditLogs: logs };
     });
   }, []);
 
-  const addAuditLog = useCallback((message) => {
-    const now = new Date();
-    const timestamp = `[${now.toTimeString().split(' ')[0]}]`;
-    setState((prev) => {
-      const newLogs = [...prev.auditLogs, { id: Date.now() + Math.random(), timestamp, message }];
-      if (newLogs.length > 50) newLogs.shift();
-      return { ...prev, auditLogs: newLogs };
-    });
+  const onNormalCycleCallbackRef = useRef(null);
+
+  // page.js calls this once to wire up signal-hook callbacks
+  const registerCallbacks = useCallback((onAvenue, onCleared, onNormal) => {
+    onAvenueCallbackRef.current     = onAvenue;
+    onClearedCallbackRef.current    = onCleared;
+    onNormalCycleCallbackRef.current = onNormal || null;
   }, []);
 
-  const toggleManualOverride = useCallback(() => {
-    const newVal = !stateRef.current.manualOverride;
-    updateState({ manualOverride: newVal });
-    addAuditLog(`Manual override ${newVal ? 'ACTIVATED' : 'DEACTIVATED'}.`);
-  }, [updateState, addAuditLog]);
-
+  // ENTER key: dispatch ambulance  |  N key: start normal cycle  |  F key: freeze
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      // ENTER: Dispatch Ambulance
+    const onKey = (e) => {
       if (e.code === 'Enter') {
-        e.preventDefault(); 
-        setIsSimulationRunning(prev => {
-          if (prev) return prev; // Ignore spam if already running
-          addAuditLog('Ambulance Dispatched!');
-          return true;
-        });
-      }
-      
-      // L: Toggle Traffic Light manually
-      if (e.code === 'KeyL') {
         e.preventDefault();
-        setState(prev => {
-          const nextState = prev.signalState === 'RED' ? 'GREEN' : 'RED';
-          addAuditLog(`Traffic Light manually set to ${nextState}.`);
-          return { ...prev, signalState: nextState };
-        });
+        if (simRunningRef.current) return; // already running, ignore
+        simRunningRef.current = true;
+        avenueEventFiredRef.current  = false;
+        clearedEventFiredRef.current = false;
+        xRef.current = AMB_START_X;
+        addLog('Ambulance dispatched — heading East on Main Avenue.');
+        update({ isSimulationRunning: true });
+        // Signal hook: immediately preempt (handles normal-cycle interruption too)
+        if (onAvenueCallbackRef.current) {
+          // will be called again when ambulance reaches AVE_ENTRY_X,
+          // but fire early so signal switches NOW
+        }
+      }
+      if (e.code === 'KeyN') {
+        e.preventDefault();
+        // Jump straight to normal cycle
+        if (onNormalCycleCallbackRef.current) {
+          onNormalCycleCallbackRef.current();
+          addLog('Normal cycle activated by operator.');
+        }
+      }
+      if (e.code === 'KeyF') {
+        isFrozenRef.current = !isFrozenRef.current;
+        update({ isFrozen: isFrozenRef.current });
+        addLog('System ' + (isFrozenRef.current ? 'FROZEN' : 'UNFROZEN') + '.');
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addAuditLog]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addLog, update]);
 
+  // Ambulance movement loop
   useEffect(() => {
-    if (useMockData) {
-      addAuditLog('System initialized in MOCK mode. Press ENTER to start simulation.');
-      
-      let x = -85;
-      let z = -40;
-      let rotation = 0;
-      
-      const interval = setInterval(() => {
-        if (stateRef.current.manualOverride) return; 
-        if (!simulationRunningRef.current) return; 
+    if (!useMockData) return;
+    addLog('System ready. Press ENTER to dispatch ambulance.');
+    const interval = setInterval(() => {
+      if (!simRunningRef.current || isFrozenRef.current) return;
+      xRef.current += AMB_SPEED_DX;
+      const x = xRef.current;
 
-        // Segment 1: Drive down the side street (increasing Z)
-        if (z < -4.2) {
-          z += 0.4; // Speed
-          rotation = 0; // facing +Z direction
-        } else if (x > -35 && x < -15) {
-          // Slight swerve for visual effect when crossing intersection
-          x += 0.4;
-          rotation = -Math.PI / 2 + 0.1;
-        } else {
-          // Straight run down the avenue
-          x += 0.4;
-          rotation = -Math.PI / 2;
-        }
-        
-        // Reset the loop once it drives off into the distance
-        if (x > 150) {
-          x = -85;
-          z = -40;
-          rotation = 0;
-          addAuditLog('Ambulance has exited. Waiting for next dispatch (Press Enter).');
-          setIsSimulationRunning(false); // Stop the simulation loop
-        }
-
-        const distanceToIntersection = Math.max(0, Math.abs(x - 0) * 10 + Math.abs(z - 0) * 10);
-        
-        // Preemption is active as long as it is on the main avenue but hasn't passed the signal
-        const isPreempted = x > -85 && x < 5;
-        const systemStatus = isPreempted ? 'EMERGENCY_PREEMPTION_ACTIVE' : 'NOMINAL';
-
-        // Log the exact moment it makes the turn
-        if (Math.abs(x - -85) < 0.3 && x > -85 && z >= -4.5) {
-          addAuditLog('Vehicle turned onto Main Avenue.');
-          addAuditLog('Phase C Actuation -> Signal GREEN.');
-          updateState({ signalState: 'GREEN' });
-        }
-
-        updateState({
-          ambulancePosition: { x, y: 0.5, z, rotation },
-          distanceToIntersection,
-          isPreempted,
-          systemStatus
+      if (!avenueEventFiredRef.current && x >= AVE_ENTRY_X) {
+        avenueEventFiredRef.current = true;
+        addLog('Ambulance on avenue — West corridor GREEN.');
+        if (onAvenueCallbackRef.current) onAvenueCallbackRef.current();
+      }
+      if (!clearedEventFiredRef.current && x >= CLEARED_X) {
+        clearedEventFiredRef.current = true;
+        addLog('Ambulance cleared junction — sequential release begins.');
+        if (onClearedCallbackRef.current) onClearedCallbackRef.current();
+      }
+      if (x > AMB_WRAP_X) {
+        simRunningRef.current = false;
+        xRef.current = AMB_START_X;
+        addLog('Ambulance exited. Press ENTER for next run.');
+        update({
+          isSimulationRunning: false,
+          ambulancePosition: { x: AMB_START_X, y: 0.5, z: AMB_LANE_Z, rotation: -Math.PI / 2 },
         });
+        return;
+      }
+      update({ ambulancePosition: { x, y: 0.5, z: AMB_LANE_Z, rotation: -Math.PI / 2 } });
+    }, 50);
+    return () => clearInterval(interval);
+  }, [useMockData, addLog, update]);
 
-      }, 50);
-
-      return () => clearInterval(interval);
-    } else {
-      addAuditLog('Connecting to Socket.io backend...');
-      const socket = io('http://localhost:5000');
-      
-      socket.on('connect', () => {
-        addAuditLog('Socket connected successfully.');
-      });
-
-      socket.on('preemption_event', (data) => {
-        if (!stateRef.current.manualOverride) {
-           updateState(data);
-        }
-      });
-
-      return () => socket.disconnect();
-    }
-  }, [useMockData, updateState, addAuditLog]);
-
-  const effectiveIsPreempted = state.manualOverride || state.isPreempted;
-  
   return {
-    ...state,
-    isPreempted: effectiveIsPreempted,
-    toggleManualOverride,
-    isSimulationRunning
+    ambulancePosition: state.ambulancePosition,
+    isSimulationRunning: state.isSimulationRunning,
+    isFrozen: state.isFrozen,
+    auditLogs: state.auditLogs,
+    isPreempted: false,  // managed by useTrafficSignal now
+    registerCallbacks,
   };
 }

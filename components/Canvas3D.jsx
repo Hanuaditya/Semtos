@@ -1,6 +1,6 @@
 import React, { Suspense, useRef, useState, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Html, useProgress, PointerLockControls } from '@react-three/drei';
+import { Html, useProgress, PointerLockControls, TransformControls, useGLTF, Center, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { CityScene } from './CityScene';
 import { Ambulance3D } from './Ambulance3D';
@@ -23,13 +23,24 @@ function Loader() {
   );
 }
 
-export function CameraTracker({ isFreeRoam }) {
+export function CameraTracker({ isFreeRoam, editMode, boundaryMode }) {
   const textRef = useRef();
 
   useFrame((state) => {
     if (textRef.current) {
       const { x, y, z } = state.camera.position;
-      textRef.current.innerText = `X: ${x.toFixed(2)} | Y: ${y.toFixed(2)} | Z: ${z.toFixed(2)}`;
+      
+      const vector = new THREE.Vector3(0, 0, -1);
+      vector.applyQuaternion(state.camera.quaternion);
+      
+      let heading = "";
+      if (Math.abs(vector.x) > Math.abs(vector.z)) {
+          heading = vector.x > 0 ? "EAST (+X)" : "WEST (-X)";
+      } else {
+          heading = vector.z > 0 ? "SOUTH (+Z)" : "NORTH (-Z)";
+      }
+
+      textRef.current.innerText = `X: ${x.toFixed(2)} | Y: ${y.toFixed(2)} | Z: ${z.toFixed(2)} | FACING: ${heading}`;
     }
   });
 
@@ -38,7 +49,7 @@ export function CameraTracker({ isFreeRoam }) {
     <Html style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 50 }}>
       <div className="bg-black/80 text-emerald-400 p-3 rounded border border-emerald-500 font-mono text-sm whitespace-nowrap shadow-lg">
         <div className="mb-1 text-xs text-emerald-600 font-bold">
-          MODE: {isFreeRoam ? 'FREE ROAM (Click to lock mouse)' : 'CINEMATIC'} (Press 'C' to toggle)
+          MODE: {editMode ? 'EDIT MODE (Unlocked)' : boundaryMode ? 'BOUNDARY MODE (Unlocked)' : isFreeRoam ? 'FREE ROAM (Locked)' : 'CINEMATIC'} (Press 'C' to toggle Free Roam)
         </div>
         <strong>CAMERA:</strong> <span ref={textRef}>Loading...</span>
       </div>
@@ -126,47 +137,118 @@ export function CinematicCamera({ ambulancePosition }) {
   return null;
 }
 
-export function TrafficLightOverlay({ signalState }) {
-  // Corrected coordinates: Raised Y to 3.82, shifted X to -4.56, adjusted Z to -1.62
-  const signalPos = [-4.61, 3.8, -1.7];
+// ──────────────────────────────────────────────────────────────────────────────
+// Traffic Light Overlay – 4 poles, one per road arm, real R/Y/G state
+// Positions are tuned to sit at the four corners of the intersection.
+// ──────────────────────────────────────────────────────────────────────────────
+function TrafficLightPole({ position, rotation, nsGreen, nsYellow, ewGreen, ewYellow, isNS }) {
+  const gap = 0.22;
+  const green  = isNS ? nsGreen  : ewGreen;
+  const yellow = isNS ? nsYellow : ewYellow;
+  const red    = !green && !yellow;
+
+  const redCol    = red    ? '#ef4444' : '#2d1515';
+  const yellowCol = yellow ? '#facc15' : '#2d2510';
+  const greenCol  = green  ? '#22c55e' : '#0d2010';
 
   return (
-    <group position={signalPos}>
-      {/* 1. Point light source illuminating the intersection */}
-      <pointLight 
-        color={signalState === 'GREEN' ? "#10b981" : "#ef4444"} 
-        intensity={signalState === 'GREEN' ? 15 : 6} 
-        distance={20} 
-      />
-
-      {/* 2. Scaled bulb mesh centered inside top lens */}
+    <group position={position} rotation={rotation}>
+      {/* Pole */}
+      <mesh position={[0, -1.2, 0]}>
+        <cylinderGeometry args={[0.04, 0.04, 2.4, 8]} />
+        <meshStandardMaterial color="#334155" />
+      </mesh>
+      {/* Housing */}
       <mesh position={[0, 0, 0]}>
-        <sphereGeometry args={[0.075, 16, 16]} />
-        <meshBasicMaterial color={signalState === 'GREEN' ? "#a7f3d0" : "#475569"} />
+        <boxGeometry args={[0.22, 0.75, 0.18]} />
+        <meshStandardMaterial color="#1e293b" />
       </mesh>
-      <mesh position={[0, -0.6, 0]}>
-        <sphereGeometry args={[0.2, 16, 16]} />
-        <meshBasicMaterial color={signalState === 'RED' ? "#fca5a5" : "#475569"} />
+      {/* RED bulb */}
+      <mesh position={[0, gap, 0]}>
+        <sphereGeometry args={[0.08, 16, 16]} />
+        <meshBasicMaterial color={redCol} />
       </mesh>
+      {/* Point light for active bulb */}
+      {red && <pointLight color="#ef4444" intensity={8} distance={12} />}
+      {/* YELLOW bulb */}
+      <mesh position={[0, 0, 0]}>
+        <sphereGeometry args={[0.08, 16, 16]} />
+        <meshBasicMaterial color={yellowCol} />
+      </mesh>
+      {yellow && <pointLight color="#facc15" intensity={6} distance={10} />}
+      {/* GREEN bulb */}
+      <mesh position={[0, -gap, 0]}>
+        <sphereGeometry args={[0.08, 16, 16]} />
+        <meshBasicMaterial color={greenCol} />
+      </mesh>
+      {green && <pointLight color="#22c55e" intensity={14} distance={18} />}
     </group>
   );
 }
 
-export function Canvas3D({ ambulancePosition, isPreempted, signalState }) {
+export function TrafficLightOverlay({ nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false }) {
+  // Each pole gets its own independent R/Y/G state
+  const nProps = { nsGreen: nGreen, nsYellow: nYellow, ewGreen: false,  ewYellow: false,  isNS: true  };
+  const sProps = { nsGreen: sGreen, nsYellow: sYellow, ewGreen: false,  ewYellow: false,  isNS: true  };
+  const eProps = { nsGreen: false,  nsYellow: false,   ewGreen: eGreen, ewYellow: eYellow, isNS: false };
+  const wProps = { nsGreen: false,  nsYellow: false,   ewGreen: wGreen, ewYellow: wYellow, isNS: false };
+
+  return (
+    <group>
+      {/* North arm – signal faces south-bound traffic */}
+      <TrafficLightPole {...nProps} position={[-4.2, 4.2, -9.5]}  rotation={[0, 0, 0]} />
+      {/* South arm – signal faces north-bound traffic */}
+      <TrafficLightPole {...sProps} position={[3.8,  4.2,  9.5]}  rotation={[0, Math.PI, 0]} />
+      {/* East arm – signal faces west-bound traffic */}
+      <TrafficLightPole {...eProps} position={[12.0, 4.2, -1.5]}  rotation={[0, -Math.PI / 2, 0]} />
+      {/* West arm – signal faces east-bound traffic (ambulance road) */}
+      <TrafficLightPole {...wProps} position={[-12.0, 4.2, 7.5]}  rotation={[0, Math.PI / 2, 0]} />
+    </group>
+  );
+}
+
+
+export function CctvOverlay() {
+  const { scene: cctvScene } = useGLTF('/cctv.glb');
+
+  return (
+    <group position={[-4.91, 3.65, -2.80]} rotation={[0, 26 * (Math.PI / 180), 0]}>
+      <Center>
+        <primitive object={cctvScene} scale={0.351} />
+      </Center>
+    </group>
+  );
+}
+
+export function Canvas3D({ ambulancePosition, isPreempted, isFrozen, signalPhase, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false }) {
   const [isFreeRoam, setIsFreeRoam] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [boundaryMode, setBoundaryMode] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.code === 'KeyC') {
         setIsFreeRoam((prev) => !prev);
       }
+      if (e.code === 'KeyE') {
+        setEditMode(prev => !prev);
+        setBoundaryMode(false);
+        console.log("🛠️ EDIT MODE TOGGLED");
+      }
+      if (e.code === 'KeyB') {
+        setBoundaryMode(prev => !prev);
+        setEditMode(false);
+        console.log("🚧 BOUNDARY MODE TOGGLED");
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const showOrbitControls = editMode || boundaryMode;
+
   return (
-    <Canvas shadows camera={{ position: [0, 50, 150], fov: 45 }}>
+    <Canvas shadows={{ type: THREE.PCFShadowMap }} camera={{ position: [0, 50, 150], fov: 45 }}>
       {/* Dark Mode Atmosphere */}
       <color attach="background" args={['#020617']} />
       <fog attach="fog" args={['#020617', 50, 400]} />
@@ -192,11 +274,19 @@ export function Canvas3D({ ambulancePosition, isPreempted, signalState }) {
       <Suspense fallback={<Loader />}>
         <CityScene isPreempted={isPreempted} />
         <Ambulance3D position={ambulancePosition} />
-        <TrafficLightOverlay signalState={signalState} />
-        <TrafficManager 
-          ambulancePosition={ambulancePosition} 
+        <TrafficLightOverlay
+          nGreen={nGreen} sGreen={sGreen} eGreen={eGreen} wGreen={wGreen}
+          nYellow={nYellow} sYellow={sYellow} eYellow={eYellow} wYellow={wYellow}
+        />
+        <CctvOverlay />
+        <TrafficManager
+          ambulancePosition={ambulancePosition}
           isPreempted={isPreempted}
-          signalState={signalState} 
+          nGreen={nGreen} sGreen={sGreen} eGreen={eGreen} wGreen={wGreen}
+          nYellow={nYellow} sYellow={sYellow} eYellow={eYellow} wYellow={wYellow}
+          isFrozen={isFrozen}
+          editMode={editMode}
+          boundaryMode={boundaryMode}
         />
       </Suspense>
 
@@ -217,10 +307,12 @@ export function Canvas3D({ ambulancePosition, isPreempted, signalState }) {
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
 
-      <CameraTracker isFreeRoam={isFreeRoam} />
+      <CameraTracker isFreeRoam={isFreeRoam} editMode={editMode} boundaryMode={boundaryMode} />
 
-
-      {isFreeRoam ? (
+      {/* Use OrbitControls when editing so the mouse isn't locked! */}
+      {showOrbitControls ? (
+        <OrbitControls makeDefault />
+      ) : isFreeRoam ? (
         <MinecraftControls />
       ) : (
         <CinematicCamera ambulancePosition={ambulancePosition} />

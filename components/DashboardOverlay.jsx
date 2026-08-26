@@ -141,6 +141,29 @@ export function DashboardOverlay({
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-slate-400/80 font-mono text-[10px] tracking-widest uppercase bg-slate-900/50 px-4 py-1.5 rounded backdrop-blur border border-slate-700/50 pointer-events-auto z-20 shadow-lg">
         Press [SPACE] to start/pause simulation | Press [TAB] to toggle HUD
       </div>
+      <div className="absolute top-4 right-4 flex flex-col gap-2 pointer-events-auto">
+        <div className="bg-black/80 p-3 rounded-lg border border-white/20 shadow-lg text-center backdrop-blur-sm">
+          <div className="text-white text-xs font-bold mb-1 border-b border-white/20 pb-1">COMPASS</div>
+          <div className="grid grid-cols-3 gap-1 text-[10px] font-mono text-gray-400">
+            <div></div>
+            <div className="text-blue-400 font-bold">+X (East)</div>
+            <div></div>
+            
+            <div className="text-green-400 font-bold flex items-center justify-end">-Z (South)</div>
+            <div className="w-4 h-4 rounded-full border border-gray-500 flex items-center justify-center mx-auto my-1 relative">
+               <div className="w-1 h-1 bg-white rounded-full"></div>
+            </div>
+            <div className="text-green-400 font-bold flex items-center justify-start">+Z (North)</div>
+            
+            <div></div>
+            <div className="text-blue-400 font-bold">-X (West)</div>
+            <div></div>
+          </div>
+          <div className="mt-2 text-[9px] text-gray-500 leading-tight">
+            Ambulance drives East (+X)
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
