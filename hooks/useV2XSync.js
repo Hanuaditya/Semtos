@@ -9,39 +9,39 @@ const STORAGE_KEY = 'SEMTOS_V2X_LATEST_SNAPSHOT_V1';
 const CMD_STORAGE_KEY = 'SEMTOS_V2X_LATEST_CMD_V1';
 
 // ── Sub-Meter Calibrated Google Maps Road Nodes (Bengaluru M.G. Road Corridor) ──
-// Anchored at the true 4-way intersection of Mahatma Gandhi Rd, Brigade Rd (South), and Kamaraj Rd (North)
-export const ORIGIN_LNG = 77.608039;
-export const ORIGIN_LAT = 12.975113;
+// Anchored at the true 4-way asphalt intersection of Mahatma Gandhi Rd, Brigade Rd (South), and Kamaraj Rd (North)
+export const ORIGIN_LNG = 77.608850;
+export const ORIGIN_LAT = 12.974650;
 
 export const GOOGLE_ROAD_NODES = {
   // Main Avenue (Mahatma Gandhi Road: West <-> East)
-  W_EXIT:   [77.603800, 12.976260], // X = -135 (M.G. Road West near Anil Kumble Circle)
-  WP4:      [77.605037, 12.975921], // X = -87  (M.G. Road West Rejoin)
-  W_QUEUE:  [77.606500, 12.975510], // X = -70  (M.G. Road Opposite Barton Centre)
-  W_MID:    [77.607288, 12.975310], // X = -35  (M.G. Road Metro Station)
-  J0:       [77.608039, 12.975113], // X = 0    (M.G. Road & Brigade Rd / Kamaraj Rd 4-Way Signal)
-  WP1:      [77.609120, 12.974825], // X = +47  (M.G. Road East Detour Turnoff)
-  E_START:  [77.610150, 12.974550], // X = +90  (M.G. Road East Approach)
-  E_FAR:    [77.610900, 12.974350], // X = +120 (Trinity / Mayo Hall Approach)
+  W_EXIT:   [77.602010, 12.977720], // X = -135 (M.G. Road West near Anil Kumble Circle)
+  WP4:      [77.604100, 12.976780], // X = -87  (M.G. Road West Rejoin)
+  W_QUEUE:  [77.605900, 12.975980], // X = -70  (M.G. Road Opposite Metro Station)
+  W_MID:    [77.607400, 12.975300], // X = -35  (M.G. Road Frontage near Barton Centre)
+  J0:       [77.608850, 12.974650], // X = 0    (True M.G. Road & Brigade Rd / Kamaraj Rd 4-Way Signal)
+  WP1:      [77.609800, 12.974250], // X = +47  (M.G. Road East Detour Turnoff)
+  E_START:  [77.610700, 12.973900], // X = +90  (M.G. Road East Approach near Mayo Hall)
+  E_FAR:    [77.612000, 12.973400], // X = +120 (Trinity / 1 MG Lido Approach)
 
   // Cross Corridor (Brigade Road South <-> J0 <-> Kamaraj Road North)
-  S_START:  [77.607310, 12.973320], // Z = +90  (Brigade Road South)
-  S_MID:    [77.607675, 12.974220], // Z = +45  (Brigade Road Mid)
-  S_NEAR:   [77.607860, 12.974680], // Z = +22  (Brigade Road Stop Line Approach)
-  N_NEAR:   [77.608178, 12.975594], // Z = -20  (Kamaraj Road South-Mid)
-  N_MID:    [77.608294, 12.976034], // Z = -40  (Kamaraj Road Mid)
-  N_UPPER:  [77.608462, 12.976481], // Z = -60  (Kamaraj Road Upper)
-  N_FAR:    [77.608680, 12.976789], // Z = -90  (Kamaraj Road North)
-  N_END:    [77.608850, 12.977280], // Z = -120 (Kamaraj Road & Cubbon Road Junction)
+  S_START:  [77.607800, 12.972000], // Z = +90  (Brigade Road South near Residency Rd)
+  S_MID:    [77.608300, 12.973300], // Z = +45  (Brigade Road Mid)
+  S_NEAR:   [77.608650, 12.974100], // Z = +22  (Brigade Road Stop Line Approach)
+  N_NEAR:   [77.609000, 12.975200], // Z = -20  (Kamaraj Road South Entrance)
+  N_MID:    [77.609200, 12.975900], // Z = -40  (Kamaraj Road Mid)
+  N_UPPER:  [77.609350, 12.976500], // Z = -60  (Kamaraj Road Upper)
+  N_FAR:    [77.609450, 12.976900], // Z = -90  (Kamaraj Road North)
+  N_END:    [77.609500, 12.977200], // Z = -120 (Kamaraj Road & Cubbon Road Junction)
 
   // Case 03 5-Leg North Block Detour (East Bypass -> Cubbon Rd -> Anil Kumble / St. Mark's Connector)
-  WP1_MID:  [77.608980, 12.976050], // Leg 2 Midpoint (Northbound Connector to Cubbon Rd)
-  WP2:      [77.608850, 12.977280], // X = +47, Z = -60 (Cubbon Rd & Kamaraj Rd Corner)
-  LEG3_M1:  [77.607781, 12.977421], // Cubbon Road East-Mid
-  LEG3_M2:  [77.606864, 12.977788], // Cubbon Road Center (North of Parade Ground)
-  LEG3_M3:  [77.605603, 12.978285], // Cubbon Road West-Mid
-  WP3:      [77.604213, 12.978846], // X = -87, Z = -60 (Cubbon Rd West Turn)
-  WP3_MID:  [77.604625, 12.977380], // Leg 4 Midpoint (Southbound Return to M.G. Road)
+  WP1_MID:  [77.609300, 12.975800], // Leg 2 Midpoint (Northbound Connector to Cubbon Rd)
+  WP2:      [77.609500, 12.977200], // X = +47, Z = -60 (Cubbon Rd & Kamaraj Rd Corner)
+  LEG3_M1:  [77.607800, 12.977700], // Cubbon Road North of Parade Ground East
+  LEG3_M2:  [77.605800, 12.978250], // Cubbon Road Center
+  LEG3_M3:  [77.603800, 12.978700], // Cubbon Road West
+  WP3:      [77.602420, 12.978920], // X = -87, Z = -60 (Cubbon Rd & Central St Corner)
+  WP3_MID:  [77.602200, 12.978300], // Leg 4 Midpoint (Central St Southbound Return)
 };
 
 const MAIN_AVE_STATIONS = [
