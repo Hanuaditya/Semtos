@@ -5,6 +5,7 @@ import { useTrafficStream } from '../../hooks/useTrafficStream';
 import { useTrafficSignal } from '../../hooks/useTrafficSignal';
 import { useCase3TrafficStream } from '../../hooks/useCase3TrafficStream';
 import { useHardwareSerial } from '../../hooks/useHardwareSerial';
+import { useHardwareWifi } from '../../hooks/useHardwareWifi';
 import { Canvas3D } from '../../components/Canvas3D';
 
 function Case1SignalHUD({ phase, nGreen, sGreen, eGreen, wGreen, nYellow, sYellow, eYellow, wYellow, timeRemaining, onBackToMenu, onSwitchCase }) {
@@ -281,7 +282,7 @@ export default function Dashboard() {
   // Case 3 Hook
   const case3 = useCase3TrafficStream();
 
-  // ESP32 Web Serial Hardware Synchronization
+  // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
     isConnected: isSerialConnected,
     portName: serialPortName,
@@ -290,6 +291,25 @@ export default function Dashboard() {
     disconnectESP32,
     sendByteCommand,
   } = useHardwareSerial();
+
+  // ESP32 Wi-Fi V2I HTTP Actuation (Wireless Hotspot Demo)
+  const {
+    espIp,
+    updateEspIp,
+    isWifiEnabled,
+    toggleWifi,
+    lastWifiByteSent,
+    wifiStatus,
+    sendWifiCommand,
+    testPing,
+  } = useHardwareWifi();
+
+  const [showHardwareMenu, setShowHardwareMenu] = useState(false);
+  const [tempIp, setTempIp] = useState(espIp);
+
+  useEffect(() => {
+    setTempIp(espIp);
+  }, [espIp]);
 
   useEffect(() => {
     if (selectedCase === 1) {
@@ -348,6 +368,7 @@ export default function Dashboard() {
     }
 
     sendByteCommand(targetByte);
+    sendWifiCommand(targetByte);
   }, [
     selectedCase,
     case1Signal.phase,
@@ -359,7 +380,8 @@ export default function Dashboard() {
     case3.signals.phase,
     case3.signals.nGreen,
     case3.signals.nYellow,
-    sendByteCommand
+    sendByteCommand,
+    sendWifiCommand
   ]);
 
   const cases = [
@@ -541,7 +563,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Top-Right Hardware Control Bar (ESP32 Signal Sync) ── */}
+      {/* ── Top-Right Hardware Control Bar (Dual USB Serial & Wi-Fi V2I) ── */}
       <div style={{
         position: 'fixed',
         top: 20,
@@ -549,41 +571,42 @@ export default function Dashboard() {
         zIndex: 120,
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
+        gap: 8,
         fontFamily: 'monospace'
       }}>
+        {/* USB Serial Indicator / Button */}
         {!isSerialConnected ? (
           <button
             onClick={connectESP32}
-            title="Connect physical ESP32 Traffic Light over USB Serial (115200 baud)"
+            title="Connect USB Serial (Zero-Fail 115200 baud Fallback)"
             style={{
               background: 'rgba(2, 6, 23, 0.94)',
               color: '#38bdf8',
               border: '1.5px solid #0284c7',
               borderRadius: 8,
-              padding: '8px 14px',
+              padding: '7px 12px',
               fontSize: 11,
               fontWeight: 800,
               cursor: 'pointer',
-              boxShadow: '0 0 16px rgba(2, 132, 199, 0.35)',
+              boxShadow: '0 0 14px rgba(2, 132, 199, 0.35)',
               backdropFilter: 'blur(10px)',
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              letterSpacing: 1.2,
+              gap: 6,
+              letterSpacing: 1,
               transition: 'all 0.2s ease',
             }}
             onMouseEnter={e => {
               e.currentTarget.style.background = 'rgba(14, 165, 233, 0.18)';
-              e.currentTarget.style.boxShadow = '0 0 24px rgba(56, 189, 248, 0.55)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(56, 189, 248, 0.55)';
             }}
             onMouseLeave={e => {
               e.currentTarget.style.background = 'rgba(2, 6, 23, 0.94)';
-              e.currentTarget.style.boxShadow = '0 0 16px rgba(2, 132, 199, 0.35)';
+              e.currentTarget.style.boxShadow = '0 0 14px rgba(2, 132, 199, 0.35)';
             }}
           >
-            <span style={{ fontSize: 13 }}>🔌</span>
-            <span>CONNECT ESP32 SIGNAL</span>
+            <span>🔌</span>
+            <span>USB SERIAL</span>
           </button>
         ) : (
           <div style={{
@@ -596,24 +619,22 @@ export default function Dashboard() {
                 : '#ef4444'
             }`,
             borderRadius: 8,
-            padding: '7px 14px',
+            padding: '6px 12px',
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
-            boxShadow: `0 0 20px ${
+            gap: 8,
+            boxShadow: `0 0 16px ${
               serialLastByte === 'P' || serialLastByte === 'G'
                 ? 'rgba(34, 197, 94, 0.35)'
                 : serialLastByte === 'Y'
                 ? 'rgba(250, 204, 21, 0.35)'
                 : 'rgba(239, 68, 68, 0.35)'
             }`,
-            backdropFilter: 'blur(10px)',
-            transition: 'all 0.25s ease'
+            backdropFilter: 'blur(10px)'
           }}>
-            {/* Colored Status Indicator Dot matching the Physical LED */}
             <div style={{
-              width: 10,
-              height: 10,
+              width: 9,
+              height: 9,
               borderRadius: '50%',
               background:
                 serialLastByte === 'P'
@@ -623,7 +644,7 @@ export default function Dashboard() {
                   : serialLastByte === 'Y'
                   ? '#facc15'
                   : '#ef4444',
-              boxShadow: `0 0 12px ${
+              boxShadow: `0 0 10px ${
                 serialLastByte === 'P'
                   ? '#10b981'
                   : serialLastByte === 'G'
@@ -634,43 +655,218 @@ export default function Dashboard() {
               }`,
               animation: serialLastByte === 'P' ? 'pulse 0.8s infinite' : 'none'
             }} />
-
-            <span style={{ fontSize: 11, fontWeight: 800, color: '#f8fafc', letterSpacing: 1.2 }}>
-              ⚡ ESP32 LINKED • BYTE:{' '}
-              <span style={{
-                color:
-                  serialLastByte === 'P'
-                    ? '#10b981'
-                    : serialLastByte === 'G'
-                    ? '#22c55e'
-                    : serialLastByte === 'Y'
-                    ? '#facc15'
-                    : '#ef4444',
-                fontWeight: 900
-              }}>
-                [{serialLastByte || 'R'}]
-              </span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: '#f8fafc' }}>
+              ⚡ USB: <strong style={{ color: serialLastByte === 'P' ? '#10b981' : serialLastByte === 'G' ? '#22c55e' : serialLastByte === 'Y' ? '#facc15' : '#ef4444' }}>[{serialLastByte || 'R'}]</strong>
             </span>
-
             <button
               onClick={disconnectESP32}
-              title="Disconnect ESP32"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#64748b',
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: 'pointer',
-                padding: '0 4px',
-                marginLeft: 4,
-                transition: 'color 0.15s ease'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = '#64748b'; }}
+              title="Disconnect USB"
+              style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 11, cursor: 'pointer', padding: '0 2px' }}
             >
               ✕
             </button>
+          </div>
+        )}
+
+        {/* Wi-Fi V2I HTTP Indicator / Button */}
+        {!isWifiEnabled ? (
+          <button
+            onClick={() => toggleWifi(true)}
+            title="Enable Wireless V2I (HTTP fetch to ESP32 IP)"
+            style={{
+              background: 'rgba(2, 6, 23, 0.94)',
+              color: '#a855f7',
+              border: '1.5px solid #9333ea',
+              borderRadius: 8,
+              padding: '7px 12px',
+              fontSize: 11,
+              fontWeight: 800,
+              cursor: 'pointer',
+              boxShadow: '0 0 14px rgba(168, 85, 247, 0.3)',
+              backdropFilter: 'blur(10px)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              letterSpacing: 1,
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(168, 85, 247, 0.18)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(168, 85, 247, 0.55)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'rgba(2, 6, 23, 0.94)';
+              e.currentTarget.style.boxShadow = '0 0 14px rgba(168, 85, 247, 0.3)';
+            }}
+          >
+            <span>📶</span>
+            <span>WI-FI V2I</span>
+          </button>
+        ) : (
+          <div style={{
+            background: 'rgba(2, 6, 23, 0.94)',
+            border: `1.5px solid ${wifiStatus === 'ERROR' ? '#ef4444' : '#a855f7'}`,
+            borderRadius: 8,
+            padding: '6px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            boxShadow: `0 0 16px ${wifiStatus === 'ERROR' ? 'rgba(239, 68, 68, 0.35)' : 'rgba(168, 85, 247, 0.35)'}`,
+            backdropFilter: 'blur(10px)'
+          }}>
+            <div style={{
+              width: 9,
+              height: 9,
+              borderRadius: '50%',
+              background: wifiStatus === 'ERROR' ? '#ef4444' : (lastWifiByteSent === 'P' ? '#10b981' : lastWifiByteSent === 'G' ? '#22c55e' : lastWifiByteSent === 'Y' ? '#facc15' : '#ef4444'),
+              boxShadow: `0 0 10px ${wifiStatus === 'ERROR' ? '#ef4444' : '#a855f7'}`
+            }} />
+            <span style={{ fontSize: 11, fontWeight: 800, color: '#f8fafc' }}>
+              📶 V2I ({espIp}): <strong style={{ color: '#c084fc' }}>[{lastWifiByteSent || 'R'}]</strong>
+            </span>
+            <button
+              onClick={() => toggleWifi(false)}
+              title="Disable Wi-Fi Actuation"
+              style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 11, cursor: 'pointer', padding: '0 2px' }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Settings Gear (Open Drawer / IP Config) */}
+        <button
+          onClick={() => setShowHardwareMenu(prev => !prev)}
+          title="Hardware Actuation Settings & Manual Test"
+          style={{
+            background: showHardwareMenu ? '#334155' : 'rgba(2, 6, 23, 0.94)',
+            color: '#94a3b8',
+            border: '1.5px solid #475569',
+            borderRadius: 8,
+            padding: '7px 10px',
+            fontSize: 12,
+            fontWeight: 800,
+            cursor: 'pointer',
+            backdropFilter: 'blur(10px)',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          ⚙️
+        </button>
+
+        {/* ── EXPANDABLE HARDWARE CONFIGURATION CARD ── */}
+        {showHardwareMenu && (
+          <div style={{
+            position: 'absolute',
+            top: 48,
+            right: 0,
+            width: 320,
+            background: 'rgba(2, 6, 23, 0.98)',
+            border: '1.5px solid #334155',
+            borderRadius: 12,
+            padding: '14px 16px',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.8), 0 0 24px rgba(56, 189, 248, 0.2)',
+            backdropFilter: 'blur(16px)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            zIndex: 130
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 900, color: '#38bdf8', letterSpacing: 1.2 }}>
+                HARDWARE ACTUATION CONFIG
+              </span>
+              <button
+                onClick={() => setShowHardwareMenu(false)}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Wi-Fi V2I IP Settings */}
+            <div>
+              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, marginBottom: 5 }}>
+                📶 ESP32 WI-FI IP (HOTSPOT / SOFTAP):
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="text"
+                  value={tempIp}
+                  onChange={e => setTempIp(e.target.value)}
+                  placeholder="e.g. 192.168.4.1"
+                  style={{
+                    flex: 1,
+                    background: '#0f172a',
+                    border: '1px solid #475569',
+                    borderRadius: 6,
+                    padding: '5px 8px',
+                    color: '#f8fafc',
+                    fontSize: 11,
+                    fontFamily: 'monospace'
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    updateEspIp(tempIp);
+                    toggleWifi(true);
+                  }}
+                  style={{
+                    background: '#9333ea',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    padding: '5px 10px',
+                    fontSize: 10,
+                    fontWeight: 800,
+                    cursor: 'pointer'
+                  }}
+                >
+                  SAVE & LINK
+                </button>
+              </div>
+              <div style={{ fontSize: 9, color: '#64748b', marginTop: 4 }}>
+                Target Endpoint: <code>http://{espIp}/signal?cmd=...</code>
+              </div>
+            </div>
+
+            {/* Quick Test Triggers */}
+            <div style={{ borderTop: '1px solid #334155', paddingTop: 8 }}>
+              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, marginBottom: 6 }}>
+                MANUAL HARDWARE OVERRIDE (TEST LEDS):
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <button
+                  onClick={() => { sendByteCommand('P'); testPing('P'); }}
+                  style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
+                >
+                  🟢 TEST 'P' (PREEMPTION)
+                </button>
+                <button
+                  onClick={() => { sendByteCommand('G'); testPing('G'); }}
+                  style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
+                >
+                  🟢 TEST 'G' (GREEN)
+                </button>
+                <button
+                  onClick={() => { sendByteCommand('Y'); testPing('Y'); }}
+                  style={{ background: '#ca8a04', color: '#000', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
+                >
+                  🟡 TEST 'Y' (YELLOW)
+                </button>
+                <button
+                  onClick={() => { sendByteCommand('R'); testPing('R'); }}
+                  style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
+                >
+                  🔴 TEST 'R' (RED)
+                </button>
+              </div>
+            </div>
+
+            {/* Recommendation note */}
+            <div style={{ borderTop: '1px solid #334155', paddingTop: 6, fontSize: 9, color: '#64748b', lineHeight: 1.4 }}>
+              💡 <strong>Presentation Tip:</strong> Both USB and Wi-Fi run concurrently. You can demo Wi-Fi V2I wirelessly via phone hotspot, with USB Serial connected as a fail-safe.
+            </div>
           </div>
         )}
       </div>
