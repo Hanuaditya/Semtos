@@ -779,7 +779,7 @@ export function Canvas3D({
       </Canvas>
 
       {/* ── 2D HUD OVERLAYS (Positioned over Canvas) ── */}
-      <div style={{ position: 'fixed', top: '20px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
+      <div style={{ position: 'fixed', top: '72px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
         <div className="bg-black/90 text-emerald-400 p-3 rounded-lg border border-emerald-500 font-mono text-sm whitespace-nowrap shadow-2xl backdrop-blur-md">
           <div className="mb-2 text-xs text-emerald-500 font-bold flex items-center justify-between gap-4">
             <span>MODE: <span className="text-white font-semibold">{modeLabel}</span></span>

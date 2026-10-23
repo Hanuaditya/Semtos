@@ -120,6 +120,13 @@ export function useTrafficSignal() {
   let isPreempted = false;
 
   const currentNormalArm = SEQ_ARMS[seqIdx]; // 'N', 'S', 'W', or 'E'
+  const isYellow = timeRemaining <= 2500 && (
+    phase === 'N_RELEASE' ||
+    phase === 'S_RELEASE' ||
+    phase === 'W_RELEASE' ||
+    phase === 'E_RELEASE' ||
+    phase === 'NORMAL_CYCLE'
+  );
 
   switch (phase) {
     case 'W_GREEN':
@@ -130,16 +137,28 @@ export function useTrafficSignal() {
       eGreen = true;       // Keep east green so yielded cars merge back and go
       isPreempted = false;
       break;
-    case 'N_RELEASE': nGreen = true; break;
-    case 'S_RELEASE': sGreen = true; break;
-    case 'W_RELEASE': wGreen = true; break;
-    case 'E_RELEASE': eGreen = true; break;
+    case 'N_RELEASE':
+      nGreen = !isYellow;
+      nYellow = isYellow;
+      break;
+    case 'S_RELEASE':
+      sGreen = !isYellow;
+      sYellow = isYellow;
+      break;
+    case 'W_RELEASE':
+      wGreen = !isYellow;
+      wYellow = isYellow;
+      break;
+    case 'E_RELEASE':
+      eGreen = !isYellow;
+      eYellow = isYellow;
+      break;
     case 'NORMAL_CYCLE':
       // One arm at a time — same sequential logic as the release phases
-      if (currentNormalArm === 'N') nGreen = true;
-      if (currentNormalArm === 'S') sGreen = true;
-      if (currentNormalArm === 'W') wGreen = true;
-      if (currentNormalArm === 'E') eGreen = true;
+      if (currentNormalArm === 'N') { nGreen = !isYellow; nYellow = isYellow; }
+      if (currentNormalArm === 'S') { sGreen = !isYellow; sYellow = isYellow; }
+      if (currentNormalArm === 'W') { wGreen = !isYellow; wYellow = isYellow; }
+      if (currentNormalArm === 'E') { eGreen = !isYellow; eYellow = isYellow; }
       break;
     default: break; // ALL_RED — all false
   }

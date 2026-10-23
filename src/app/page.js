@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useTrafficStream } from '../../hooks/useTrafficStream';
 import { useTrafficSignal } from '../../hooks/useTrafficSignal';
 import { useCase3TrafficStream } from '../../hooks/useCase3TrafficStream';
+import { useHardwareSerial } from '../../hooks/useHardwareSerial';
 import { Canvas3D } from '../../components/Canvas3D';
 
 function Case1SignalHUD({ phase, nGreen, sGreen, eGreen, wGreen, nYellow, sYellow, eYellow, wYellow, timeRemaining, onBackToMenu, onSwitchCase }) {
@@ -280,6 +281,16 @@ export default function Dashboard() {
   // Case 3 Hook
   const case3 = useCase3TrafficStream();
 
+  // ESP32 Web Serial Hardware Synchronization
+  const {
+    isConnected: isSerialConnected,
+    portName: serialPortName,
+    lastByteSent: serialLastByte,
+    connectESP32,
+    disconnectESP32,
+    sendByteCommand,
+  } = useHardwareSerial();
+
   useEffect(() => {
     if (selectedCase === 1) {
       case1Stream.registerCallbacks(
@@ -289,6 +300,67 @@ export default function Dashboard() {
       );
     }
   }, [selectedCase, case1Stream.registerCallbacks, case1Signal.onAmbulanceOnAvenue, case1Signal.onAmbulanceCleared, case1Signal.onNormalCycle]);
+
+  // Synchronize simulation signal states in real-time to physical ESP32
+  useEffect(() => {
+    let targetByte = 'R';
+
+    if (selectedCase === 1) {
+      // ── In CASE 01 (West Approach Monitoring): ──────────────────────────
+      // - If signalPhase === 'W_GREEN' or signalPhase === 'E_RESUME': send 'P'.
+      // - If signalPhase === 'W_RELEASE': send 'G'.
+      // - If transitioning from West Green (Yellow phase): send 'Y'.
+      // - For all other phases (ALL_RED, N_RELEASE, S_RELEASE, E_RELEASE): send 'R'.
+      const phase = case1Signal.phase;
+      const signalPhase = case1Signal.signalPhase;
+
+      if (phase === 'W_GREEN' || phase === 'E_RESUME' || (signalPhase === 'W_GREEN' && phase !== 'NORMAL_CYCLE')) {
+        targetByte = 'P';
+      } else if (case1Signal.wYellow) {
+        targetByte = 'Y';
+      } else if (phase === 'W_RELEASE' || signalPhase === 'W_RELEASE' || (phase === 'NORMAL_CYCLE' && case1Signal.wGreen)) {
+        targetByte = 'G';
+      } else {
+        targetByte = 'R';
+      }
+    } else if (selectedCase === 3) {
+      // ── In CASE 03 (Ambulance A South Corridor & Post-Clearance Cycle): ──
+      // - Before dispatch (IDLE_STANDBY / ALL_RED): send 'R'.
+      // - Upon [ENTER] dispatch while Ambulance A's corridor is flushing: send 'P'.
+      // - During Post-Clearance Normal Traffic Orchestration:
+      //   - When monitored approach is Green: send 'G'.
+      //   - During Yellow transition: send 'Y'.
+      //   - When Red: send 'R'.
+      if (!case3.isSimulationRunning || case3.signals.phase === 'ALL_RED') {
+        targetByte = 'R';
+      } else if (!case3.trafficCycleActive) {
+        targetByte = 'P';
+      } else {
+        // Monitored approach is South approach corridor
+        if (case3.signals.nYellow) {
+          targetByte = 'Y';
+        } else if (case3.signals.nGreen) {
+          targetByte = 'G';
+        } else {
+          targetByte = 'R';
+        }
+      }
+    }
+
+    sendByteCommand(targetByte);
+  }, [
+    selectedCase,
+    case1Signal.phase,
+    case1Signal.signalPhase,
+    case1Signal.wGreen,
+    case1Signal.wYellow,
+    case3.isSimulationRunning,
+    case3.trafficCycleActive,
+    case3.signals.phase,
+    case3.signals.nGreen,
+    case3.signals.nYellow,
+    sendByteCommand
+  ]);
 
   const cases = [
     {
@@ -468,6 +540,140 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* ── Top-Right Hardware Control Bar (ESP32 Signal Sync) ── */}
+      <div style={{
+        position: 'fixed',
+        top: 20,
+        right: 20,
+        zIndex: 120,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        fontFamily: 'monospace'
+      }}>
+        {!isSerialConnected ? (
+          <button
+            onClick={connectESP32}
+            title="Connect physical ESP32 Traffic Light over USB Serial (115200 baud)"
+            style={{
+              background: 'rgba(2, 6, 23, 0.94)',
+              color: '#38bdf8',
+              border: '1.5px solid #0284c7',
+              borderRadius: 8,
+              padding: '8px 14px',
+              fontSize: 11,
+              fontWeight: 800,
+              cursor: 'pointer',
+              boxShadow: '0 0 16px rgba(2, 132, 199, 0.35)',
+              backdropFilter: 'blur(10px)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              letterSpacing: 1.2,
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(14, 165, 233, 0.18)';
+              e.currentTarget.style.boxShadow = '0 0 24px rgba(56, 189, 248, 0.55)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'rgba(2, 6, 23, 0.94)';
+              e.currentTarget.style.boxShadow = '0 0 16px rgba(2, 132, 199, 0.35)';
+            }}
+          >
+            <span style={{ fontSize: 13 }}>🔌</span>
+            <span>CONNECT ESP32 SIGNAL</span>
+          </button>
+        ) : (
+          <div style={{
+            background: 'rgba(2, 6, 23, 0.94)',
+            border: `1.5px solid ${
+              serialLastByte === 'P' || serialLastByte === 'G'
+                ? '#22c55e'
+                : serialLastByte === 'Y'
+                ? '#facc15'
+                : '#ef4444'
+            }`,
+            borderRadius: 8,
+            padding: '7px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            boxShadow: `0 0 20px ${
+              serialLastByte === 'P' || serialLastByte === 'G'
+                ? 'rgba(34, 197, 94, 0.35)'
+                : serialLastByte === 'Y'
+                ? 'rgba(250, 204, 21, 0.35)'
+                : 'rgba(239, 68, 68, 0.35)'
+            }`,
+            backdropFilter: 'blur(10px)',
+            transition: 'all 0.25s ease'
+          }}>
+            {/* Colored Status Indicator Dot matching the Physical LED */}
+            <div style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background:
+                serialLastByte === 'P'
+                  ? '#10b981'
+                  : serialLastByte === 'G'
+                  ? '#22c55e'
+                  : serialLastByte === 'Y'
+                  ? '#facc15'
+                  : '#ef4444',
+              boxShadow: `0 0 12px ${
+                serialLastByte === 'P'
+                  ? '#10b981'
+                  : serialLastByte === 'G'
+                  ? '#22c55e'
+                  : serialLastByte === 'Y'
+                  ? '#facc15'
+                  : '#ef4444'
+              }`,
+              animation: serialLastByte === 'P' ? 'pulse 0.8s infinite' : 'none'
+            }} />
+
+            <span style={{ fontSize: 11, fontWeight: 800, color: '#f8fafc', letterSpacing: 1.2 }}>
+              ⚡ ESP32 LINKED • BYTE:{' '}
+              <span style={{
+                color:
+                  serialLastByte === 'P'
+                    ? '#10b981'
+                    : serialLastByte === 'G'
+                    ? '#22c55e'
+                    : serialLastByte === 'Y'
+                    ? '#facc15'
+                    : '#ef4444',
+                fontWeight: 900
+              }}>
+                [{serialLastByte || 'R'}]
+              </span>
+            </span>
+
+            <button
+              onClick={disconnectESP32}
+              title="Disconnect ESP32"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#64748b',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: '0 4px',
+                marginLeft: 4,
+                transition: 'color 0.15s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#64748b'; }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Primary HUD depending on selected case */}
       {selectedCase === 1 ? (
