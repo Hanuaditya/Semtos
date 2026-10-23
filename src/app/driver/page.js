@@ -1,3 +1,4 @@
+// src/app/driver/page.js
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -5,17 +6,18 @@ import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   useV2XSubscriber,
-  twinToLngLat,
+  twinToRoadGeo,
   buildTwinRoadGeoJSON,
 } from '../../../hooks/useV2XSync';
 
-const MINI_SATELLITE_STYLE = {
+const GOOGLE_MINI_STYLE = {
   version: 8,
   sources: {
-    'carto-dark': {
+    'google-hybrid': {
       type: 'raster',
       tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://mt0.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}',
+        'https://mt1.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}',
       ],
       tileSize: 256,
       maxzoom: 20,
@@ -23,35 +25,34 @@ const MINI_SATELLITE_STYLE = {
   },
   layers: [
     {
-      id: 'carto-dark-base',
+      id: 'google-hybrid-base',
       type: 'raster',
-      source: 'carto-dark',
-      paint: { 'raster-brightness-max': 0.82 },
+      source: 'google-hybrid',
+      paint: { 'raster-brightness-max': 0.95, 'raster-contrast': 0.08 },
     },
   ],
 };
 
-// Commuter presets mapped to real cars in TrafficManager.jsx
 const COMMUTER_PROFILES = [
   {
     id: 'WEST_AVE_CAR',
-    label: '🚗 Car on West Avenue (Eastbound • Case 01 Corridor)',
+    label: '🚗 Car on M.G. Road (Eastbound • Case 01 Corridor)',
     dir: 'E',
     defaultX: -35.0,
     defaultZ: -7.5,
-    pullOverHint: 'PULL LEFT TO SHOULDER (Z = -9.0m)',
+    pullOverHint: 'PULL LEFT ON M.G. ROAD SHOULDER',
   },
   {
     id: 'SOUTH_AVE_CAR',
-    label: '🚗 Car on South Approach (Northbound • Case 03 Amb A Corridor)',
+    label: '🚗 Car on Brigade Road (Northbound • Case 03 Amb A Corridor)',
     dir: 'N',
     defaultX: 1.2,
     defaultZ: 42.0,
-    pullOverHint: 'PULL LEFT TO MEDIAN (X = 1.0m)',
+    pullOverHint: 'PULL LEFT ON BRIGADE ROAD CURB',
   },
   {
     id: 'NORTH_CROSS_CAR',
-    label: '🚙 Car on North Cross-Street (Southbound • Filtered / Non-Corridor)',
+    label: '🚙 Car on Opposite / Cross Approach (Filtered • No False Alarm)',
     dir: 'S',
     defaultX: -3.1,
     defaultZ: -22.0,
@@ -73,7 +74,6 @@ export default function PhoneUserDriverDashboard() {
 
   const selectedCase = snapshot.selectedCase || 1;
 
-  // Auto-select the active corridor profile when Case switches
   useEffect(() => {
     if (selectedCase === 3 && selectedProfileId === 'WEST_AVE_CAR') {
       setSelectedProfileId('SOUTH_AVE_CAR');
@@ -87,14 +87,12 @@ export default function PhoneUserDriverDashboard() {
     [selectedProfileId]
   );
 
-  // Find the matching live car from TrafficManager.jsx vehicles array
   const matchedCar = useMemo(() => {
     const cars = snapshot.vehicles || [];
     const sameDir = cars.filter((c) => c.type === profile.dir);
     if (sameDir.length === 0) {
-      return { x: profile.defaultX, z: profile.defaultZ, state: 'IDLE_QUEUE', speed: 0, receivesBLE: false };
+      return { x: profile.defaultX, z: profile.defaultZ, type: profile.dir, state: 'IDLE_QUEUE', speed: 0, receivesBLE: false };
     }
-    // Pick a car in the trailing yield zone so the user sees the exact BLE yield behavior
     if (profile.dir === 'E') {
       return sameDir.find((c) => c.x < -20 && c.x > -50) || sameDir[Math.floor(sameDir.length / 2)];
     }
@@ -104,7 +102,6 @@ export default function PhoneUserDriverDashboard() {
     return sameDir[0];
   }, [snapshot.vehicles, profile]);
 
-  // Evaluate BLE Proximity & Directional Vector Filtering (100% accurate to TrafficManager.jsx)
   const alertEvaluation = useMemo(() => {
     const activeAmbPos =
       selectedCase === 3
@@ -118,7 +115,6 @@ export default function PhoneUserDriverDashboard() {
     const ambCorridorDir = selectedCase === 3 ? 'N' : 'E';
     const isSameCorridor = profile.dir === ambCorridorDir;
 
-    // Check if ambulance has already passed this commuter car
     const hasAmbPassed =
       selectedCase === 1
         ? activeAmbPos.x > matchedCar.x + 12
@@ -129,7 +125,7 @@ export default function PhoneUserDriverDashboard() {
         mode: 'NORMAL_STANDBY',
         bannerColor: '#10b981',
         title: 'CLEAR ROAD AHEAD',
-        subtitle: 'Normal navigation active • V2X BLE listener armed',
+        subtitle: 'Google Maps V2X Navigation Active • BLE Listener Armed',
         distMeters,
         activeAmbPos,
       };
@@ -183,14 +179,12 @@ export default function PhoneUserDriverDashboard() {
     };
   }, [snapshot, selectedCase, matchedCar, profile]);
 
-  // Voice TTS & Web Audio Alert when entering CRITICAL_YIELD or CLEARED_RESUME
   useEffect(() => {
     if (!audioEnabled || typeof window === 'undefined') return;
     if (alertEvaluation.mode === lastSpokenStateRef.current) return;
     lastSpokenStateRef.current = alertEvaluation.mode;
 
     if (alertEvaluation.mode === 'CRITICAL_YIELD') {
-      // Play Web Audio Two-Tone Alert Chime
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (Ctx) {
@@ -209,7 +203,6 @@ export default function PhoneUserDriverDashboard() {
         }
       } catch (_) {}
 
-      // Speak Turn-by-Turn Yield Instruction
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(
@@ -230,58 +223,28 @@ export default function PhoneUserDriverDashboard() {
     }
   }, [alertEvaluation.mode, audioEnabled]);
 
-  // Initialize Embedded Satellite Mini-Map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    const initialCenter = twinToLngLat(matchedCar.x, matchedCar.z);
+    const myGeo = twinToRoadGeo(matchedCar.x, matchedCar.z, { carType: profile.dir });
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: MINI_SATELLITE_STYLE,
-      center: initialCenter,
-      zoom: 18.5,
-      pitch: 45,
-      bearing: profile.dir === 'E' ? 90 : profile.dir === 'N' ? 0 : 180,
+      style: GOOGLE_MINI_STYLE,
+      center: myGeo.lngLat,
+      zoom: 17.5,
+      pitch: 40,
+      bearing: 0,
       interactive: false,
     });
 
     map.on('load', () => {
       const roadGeo = buildTwinRoadGeoJSON(selectedCase, false);
-      map.addSource('mini-roads', { type: 'geojson', data: roadGeo.polygons });
+      map.addSource('mini-road-lines', { type: 'geojson', data: roadGeo.lines });
       map.addLayer({
-        id: 'mini-roads-fill',
-        type: 'fill',
-        source: 'mini-roads',
-        paint: { 'fill-color': '#090e18', 'fill-opacity': 0.95 },
-      });
-      map.addLayer({
-        id: 'mini-roads-line',
+        id: 'mini-road-corridor',
         type: 'line',
-        source: 'mini-roads',
-        paint: { 'line-color': '#334155', 'line-width': 1.5, 'line-opacity': 0.7 },
-      });
-
-      map.addSource('mini-lines', { type: 'geojson', data: roadGeo.lines });
-      map.addLayer({
-        id: 'mini-lines-dashes',
-        type: 'line',
-        source: 'mini-lines',
-        filter: ['==', ['get', 'kind'], 'lane_dash'],
-        paint: { 'line-color': '#94a3b8', 'line-width': 1.2, 'line-dasharray': [2, 2], 'line-opacity': 0.7 },
-      });
-      map.addLayer({
-        id: 'mini-lines-medians',
-        type: 'line',
-        source: 'mini-lines',
-        filter: ['==', ['get', 'kind'], 'median'],
-        paint: { 'line-color': '#facc15', 'line-width': 1.8, 'line-opacity': 0.85 },
-      });
-      map.addLayer({
-        id: 'mini-lines-route',
-        type: 'line',
-        source: 'mini-lines',
-        filter: ['in', ['get', 'kind'], ['literal', ['amb_corridor_case1', 'amb_a_corridor', 'amb_b_detour']]],
-        paint: { 'line-color': '#00f5ff', 'line-width': 4, 'line-opacity': 0.8 },
+        source: 'mini-road-lines',
+        paint: { 'line-color': '#38bdf8', 'line-width': 5, 'line-opacity': 0.7 },
       });
     });
 
@@ -293,24 +256,24 @@ export default function PhoneUserDriverDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update Commuter Marker & Ambulance Marker on Satellite Mini-Map
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const myLngLat = twinToLngLat(matchedCar.x, matchedCar.z);
-    const ambLngLat = twinToLngLat(
+    const myGeo = twinToRoadGeo(matchedCar.x, matchedCar.z, { carType: profile.dir });
+    const ambGeo = twinToRoadGeo(
       alertEvaluation.activeAmbPos.x,
-      alertEvaluation.activeAmbPos.z
+      alertEvaluation.activeAmbPos.z,
+      { isAmbulance: true, ambId: selectedCase === 3 ? 'AMB_A' : 'AMB_1' }
     );
 
     if (!commuterMarkerRef.current) {
       const el = document.createElement('div');
       commuterMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center' })
-        .setLngLat(myLngLat)
+        .setLngLat(myGeo.lngLat)
         .addTo(map);
     } else {
-      commuterMarkerRef.current.setLngLat(myLngLat);
+      commuterMarkerRef.current.setLngLat(myGeo.lngLat);
     }
 
     commuterMarkerRef.current.getElement().innerHTML = `
@@ -333,10 +296,10 @@ export default function PhoneUserDriverDashboard() {
     if (!ambMarkerRef.current) {
       const el = document.createElement('div');
       ambMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center' })
-        .setLngLat(ambLngLat)
+        .setLngLat(ambGeo.lngLat)
         .addTo(map);
     } else {
-      ambMarkerRef.current.setLngLat(ambLngLat);
+      ambMarkerRef.current.setLngLat(ambGeo.lngLat);
     }
 
     ambMarkerRef.current.getElement().innerHTML = `
@@ -357,11 +320,10 @@ export default function PhoneUserDriverDashboard() {
     `;
 
     map.easeTo({
-      center: myLngLat,
-      bearing: profile.dir === 'E' ? 90 : profile.dir === 'N' ? 0 : 180,
+      center: myGeo.lngLat,
       duration: 150,
     });
-  }, [matchedCar, alertEvaluation, profile]);
+  }, [matchedCar, alertEvaluation, profile, selectedCase]);
 
   return (
     <div style={{
@@ -375,7 +337,6 @@ export default function PhoneUserDriverDashboard() {
       fontFamily: 'monospace',
       color: '#f8fafc',
     }}>
-      {/* Top Bar */}
       <div style={{
         width: '100%',
         maxWidth: 430,
@@ -400,7 +361,7 @@ export default function PhoneUserDriverDashboard() {
           ← 3D TWIN
         </a>
         <span style={{ fontSize: 11, fontWeight: 900, color: '#f59e0b', letterSpacing: 1 }}>
-          📱 SEMTOS V2X PHONE COMPANION
+          📱 SEMTOS GOOGLE MAPS PHONE HUD
         </span>
         <a
           href="/ambulance"
@@ -419,7 +380,6 @@ export default function PhoneUserDriverDashboard() {
         </a>
       </div>
 
-      {/* Smartphone Chassis Frame */}
       <div style={{
         width: '100%',
         maxWidth: 430,
@@ -431,7 +391,6 @@ export default function PhoneUserDriverDashboard() {
         display: 'flex',
         flexDirection: 'column',
       }}>
-        {/* Phone Status Bar */}
         <div style={{
           background: '#020617',
           padding: '10px 18px',
@@ -461,10 +420,9 @@ export default function PhoneUserDriverDashboard() {
           </button>
         </div>
 
-        {/* Commuter Car Selector */}
         <div style={{ padding: '12px 14px', background: '#0f172a', borderBottom: '1px solid #1e293b' }}>
           <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 4, fontWeight: 800 }}>
-            SELECT YOUR COMMUTER VEHICLE LANE (FROM TRAFFICMANAGER.JSX):
+            SELECT YOUR COMMUTER VEHICLE LANE (ROAD-SNAPPED):
           </div>
           <select
             value={selectedProfileId}
@@ -489,7 +447,6 @@ export default function PhoneUserDriverDashboard() {
           </select>
         </div>
 
-        {/* Primary Alert Banner */}
         <div style={{
           background:
             alertEvaluation.mode === 'CRITICAL_YIELD'
@@ -511,7 +468,6 @@ export default function PhoneUserDriverDashboard() {
           </div>
         </div>
 
-        {/* Live Satellite Mini-Map */}
         <div style={{ position: 'relative', height: 250, width: '100%' }}>
           <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }} />
           <div style={{
@@ -525,11 +481,10 @@ export default function PhoneUserDriverDashboard() {
             fontSize: 9,
             color: '#cbd5e1',
           }}>
-            YOUR POS: X: {matchedCar.x.toFixed(1)}m | Z: {matchedCar.z.toFixed(1)}m
+            TWIN POS: X: {matchedCar.x.toFixed(1)}m | Z: {matchedCar.z.toFixed(1)}m
           </div>
         </div>
 
-        {/* Telemetry Cards */}
         <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, background: '#090d16' }}>
           <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: 10 }}>
             <div style={{ fontSize: 9, color: '#64748b' }}>AMBULANCE DISTANCE</div>
@@ -545,7 +500,6 @@ export default function PhoneUserDriverDashboard() {
           </div>
         </div>
 
-        {/* Quick Test Controls inside Phone HUD */}
         <div style={{ padding: '0 14px 16px 14px', display: 'flex', gap: 8 }}>
           <button
             onClick={() => sendCommand('DISPATCH')}

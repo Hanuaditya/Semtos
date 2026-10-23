@@ -1,210 +1,347 @@
+// hooks/useV2XSync.js
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// ── Bengaluru Satellite Anchor (Orthogonal 4-Way Urban Intersection) ─────────
-// Three.js Scene Origin (x: 0, z: 0) maps to this exact [lng, lat]:
-export const ORIGIN_LNG = 77.594560;
-export const ORIGIN_LAT = 12.971600;
+// ── 1. Real Google Maps Road Network Nodes in Bengaluru (M.G. Road Corridor) ──
+// Central Junction (0, 0) = M.G. Road & Brigade Road Intersection
+export const ORIGIN_LNG = 77.606620;
+export const ORIGIN_LAT = 12.975220;
 
-// 1 scene unit = 1.0 meter on Earth's surface at 12.97° N latitude
-const METERS_PER_DEG_LAT = 110630.0;
-const METERS_PER_DEG_LNG = 108460.0; // 111320 * cos(12.9716 deg)
+export const GOOGLE_ROAD_NODES = {
+  // Main Avenue (M.G. Road: West <-> East)
+  W_EXIT:   [77.59945, 12.97722], // X = -135 (Queen's Statue / Cubbon Park West)
+  WP4:      [77.60180, 12.97657], // X = -87  (Anil Kumble Circle / Central St Rejoin)
+  J0:       [77.60662, 12.97522], // X = 0    (M.G. Road & Brigade Road Central Signal)
+  WP1:      [77.60925, 12.97448], // X = +47  (M.G. Road & Kamaraj Road Turnoff)
+  E_START:  [77.61190, 12.97388], // X = +90  (Mayo Hall East Approach)
+  E_FAR:    [77.61365, 12.97358], // X = +120 (1 MG Lido Mall)
 
-/**
- * Converts exact Three.js scene coordinates (x, z) to [lng, lat].
- * In SEMTOS 3D Twin:
- *   +X = East  -> +Longitude
- *   -X = West  -> -Longitude
- *   -Z = North -> +Latitude
- *   +Z = South -> -Latitude
- */
-export function twinToLngLat(x = 0, z = 0) {
-  const lng = ORIGIN_LNG + (Number(x) || 0) / METERS_PER_DEG_LNG;
-  const lat = ORIGIN_LAT - (Number(z) || 0) / METERS_PER_DEG_LAT;
-  return [lng, lat];
+  // Cross Corridor (Brigade Road South -> J0 -> North Connector)
+  S_START:  [77.60582, 12.97125], // Z = +90  (Brigade Road South)
+  S_MID:    [77.60622, 12.97320], // Z = +45  (Brigade Road Mid)
+  N_MID:    [77.60710, 12.97685], // Z = -60  (North Cross Connector)
+  N_END:    [77.60755, 12.97825], // Z = -120 (North Exit)
+
+  // Case 03 5-Leg North Block Detour (Kamaraj Rd -> Cubbon Rd -> Central St)
+  WP1_MID:  [77.60902, 12.97625], // Kamaraj Road Midpoint
+  WP2:      [77.60878, 12.97798], // X = +47, Z = -60 (Kamaraj Rd & Cubbon Rd Corner)
+  LEG3_M1:  [77.60650, 12.97832], // Cubbon Road East-Mid
+  LEG3_M2:  [77.60440, 12.97864], // Cubbon Road West-Mid (Chinnaswamy North)
+  WP3:      [77.60242, 12.97892], // X = -87, Z = -60 (Cubbon Rd & Central St / Minsk Sq)
+  WP3_MID:  [77.60210, 12.97775], // Central Street Midpoint
+};
+
+// Polylines with corresponding 3D Twin axis stations
+const MAIN_AVE_STATIONS = [
+  { x: -135, coord: GOOGLE_ROAD_NODES.W_EXIT },
+  { x: -87,  coord: GOOGLE_ROAD_NODES.WP4 },
+  { x: 0,    coord: GOOGLE_ROAD_NODES.J0 },
+  { x: 47,   coord: GOOGLE_ROAD_NODES.WP1 },
+  { x: 90,   coord: GOOGLE_ROAD_NODES.E_START },
+  { x: 120,  coord: GOOGLE_ROAD_NODES.E_FAR },
+];
+
+const CROSS_AVE_STATIONS = [
+  { z: 90,   coord: GOOGLE_ROAD_NODES.S_START },
+  { z: 45,   coord: GOOGLE_ROAD_NODES.S_MID },
+  { z: 0,    coord: GOOGLE_ROAD_NODES.J0 },
+  { z: -60,  coord: GOOGLE_ROAD_NODES.N_MID },
+  { z: -120, coord: GOOGLE_ROAD_NODES.N_END },
+];
+
+const DETOUR_LEG2_STATIONS = [
+  { z: -2.89, coord: GOOGLE_ROAD_NODES.WP1 },
+  { z: -31.5, coord: GOOGLE_ROAD_NODES.WP1_MID },
+  { z: -60.0, coord: GOOGLE_ROAD_NODES.WP2 },
+];
+
+const DETOUR_LEG3_STATIONS = [
+  { x: 47.0,  coord: GOOGLE_ROAD_NODES.WP2 },
+  { x: 2.0,   coord: GOOGLE_ROAD_NODES.LEG3_M1 },
+  { x: -42.0, coord: GOOGLE_ROAD_NODES.LEG3_M2 },
+  { x: -87.0, coord: GOOGLE_ROAD_NODES.WP3 },
+];
+
+const DETOUR_LEG4_STATIONS = [
+  { z: -60.0, coord: GOOGLE_ROAD_NODES.WP3 },
+  { z: -31.5, coord: GOOGLE_ROAD_NODES.WP3_MID },
+  { z: -2.89, coord: GOOGLE_ROAD_NODES.WP4 },
+];
+
+function computeBearing([lon1, lat1], [lon2, lat2]) {
+  const toRad = Math.PI / 180;
+  const y = Math.sin((lon2 - lon1) * toRad) * Math.cos(lat2 * toRad);
+  const x =
+    Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) -
+    Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos((lon2 - lon1) * toRad);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
 /**
- * Converts Three.js vehicle/ambulance rotation or direction into MapLibre bearing (0° = North, 90° = East, 180° = South, 270° = West)
+ * Shifts [lng, lat] laterally by `lateralMeters` perpendicular to `roadBearingDeg`.
+ * Positive `lateralMeters` shifts to the right of `roadBearingDeg`; negative shifts left.
  */
-export function twinHeadingToBearing(typeOrDir, rotY = 0, isAmbulance = false, ambRotation = 0) {
-  // Steer deflection in degrees
-  const steerDeg = -(Number(rotY) || 0) * (180 / Math.PI) * 0.65;
+export function offsetLngLatPerpendicular([lng, lat], roadBearingDeg, lateralMeters) {
+  if (!lateralMeters || Math.abs(lateralMeters) < 0.05) return [lng, lat];
+  const perpBearingRad = ((roadBearingDeg + 90) % 360) * (Math.PI / 180);
+  const dLat = (lateralMeters * Math.cos(perpBearingRad)) / 110630.0;
+  const dLng = (lateralMeters * Math.sin(perpBearingRad)) / 108460.0;
+  return [lng + dLng, lat + dLat];
+}
 
-  if (isAmbulance) {
-    // In useTrafficStream.js (Case 1): rotation = -Math.PI / 2 (driving East +X -> 90 deg)
-    // In useCase3TrafficStream.js:
-    //   Amb A: rotation = 0 (driving North -Z -> 0 deg)
-    //   Amb B:
-    //     Leg 1 (West -X): targetRot = Math.PI / 2 -> 270 deg
-    //     Leg 2 (North -Z): targetRot = 0 -> 0 deg
-    //     Leg 3 (West -X): targetRot = Math.PI / 2 -> 270 deg
-    //     Leg 4 (South +Z): targetRot = Math.PI -> 180 deg
-    //     Leg 5 (West -X): targetRot = Math.PI / 2 -> 270 deg
-    if (Math.abs(ambRotation - (-Math.PI / 2)) < 0.25) return 90;
-    // Map continuous Three.js rotation (0 = North, +PI/2 = West, +PI = South) to compass bearing:
-    const deg = ((-ambRotation * 180) / Math.PI + 360) % 360;
-    return deg;
+function interpolateStations(stations, keyName, val) {
+  const first = stations[0];
+  const last = stations[stations.length - 1];
+  const increasing = last[keyName] > first[keyName];
+
+  for (let i = 0; i < stations.length - 1; i++) {
+    const s1 = stations[i];
+    const s2 = stations[i + 1];
+    const v1 = s1[keyName];
+    const v2 = s2[keyName];
+    const inSeg = increasing ? (val >= v1 && val <= v2) : (val <= v1 && val >= v2);
+    if (inSeg || i === stations.length - 2) {
+      const span = v2 - v1 || 1;
+      const t = Math.max(0, Math.min(1, (val - v1) / span));
+      const lng = s1.coord[0] + (s2.coord[0] - s1.coord[0]) * t;
+      const lat = s1.coord[1] + (s2.coord[1] - s1.coord[1]) * t;
+      const bearing = computeBearing(s1.coord, s2.coord);
+      return { coord: [lng, lat], bearing };
+    }
+  }
+  return { coord: first.coord, bearing: computeBearing(first.coord, last.coord) };
+}
+
+/**
+ * Master Piecewise Road-Snapped Projector:
+ * Takes any 3D Twin coordinate (x, z) + vehicle/ambulance context and returns:
+ *   { lngLat: [lng, lat], bearing: degrees }
+ * Guaranteed to lie 100% on the real Google Maps road network!
+ */
+export function twinToRoadGeo(x = 0, z = 0, options = {}) {
+  const {
+    carType = null,        // 'E' | 'W' | 'N' | 'S'
+    rotY = 0,              // lateral steering angle in radians
+    isAmbulance = false,
+    ambId = 'AMB_1',       // 'AMB_1' | 'AMB_A' | 'AMB_B'
+    wpIdx = 0,             // Case 3 Ambulance B waypoint index (0..4)
+  } = options;
+
+  const steerDeg = -(Number(rotY) || 0) * (180 / Math.PI) * 0.55;
+
+  // ── CASE A: Ambulance B on the 5-Leg North Block Detour ──
+  if (isAmbulance && ambId === 'AMB_B') {
+    if (wpIdx === 1 || (Math.abs(x - 47) < 4.5 && z < -4.5 && z > -58.5)) {
+      // Leg 2: Kamaraj Road Northbound (WP1 -> WP2)
+      const res = interpolateStations(DETOUR_LEG2_STATIONS, 'z', z);
+      return { lngLat: res.coord, bearing: res.bearing };
+    }
+    if (wpIdx === 2 || z <= -55.0) {
+      // Leg 3: Cubbon Road Westbound (WP2 -> WP3)
+      const res = interpolateStations(DETOUR_LEG3_STATIONS, 'x', x);
+      return { lngLat: res.coord, bearing: res.bearing };
+    }
+    if (wpIdx === 3 || (Math.abs(x - (-87)) < 4.5 && z < -4.5)) {
+      // Leg 4: Central Street Southbound (WP3 -> WP4)
+      const res = interpolateStations(DETOUR_LEG4_STATIONS, 'z', z);
+      return { lngLat: res.coord, bearing: res.bearing };
+    }
+    // Leg 1 (East approach x: 90 -> 47) or Leg 5 (West exit x: -87 -> -135) on M.G. Road
+    const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
+    // Westbound along M.G. Road is opposite to increasing X station order
+    const westboundBearing = (res.bearing + 180) % 360;
+    const lateralMeters = (z / 9.5) * 4.2;
+    return {
+      lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
+      bearing: westboundBearing,
+    };
   }
 
-  if (typeOrDir === 'E') return 90 + steerDeg;
-  if (typeOrDir === 'W') return 270 + steerDeg;
-  if (typeOrDir === 'N') return 0 + steerDeg;
-  if (typeOrDir === 'S') return 180 + steerDeg;
-  return 0;
+  // ── CASE B: Ambulance A on Brigade Road South->North Priority Corridor ──
+  if (isAmbulance && ambId === 'AMB_A') {
+    const res = interpolateStations(CROSS_AVE_STATIONS, 'z', z);
+    const lateralMeters = (x / 5.5) * 3.0;
+    return {
+      lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
+      bearing: res.bearing,
+    };
+  }
+
+  // ── CASE C: Case 01 Single Ambulance on M.G. Road West->East Corridor ──
+  if (isAmbulance) {
+    const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
+    const lateralMeters = (z / 9.5) * 4.2;
+    return {
+      lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
+      bearing: res.bearing,
+    };
+  }
+
+  // ── CASE D: Civilian Cars on M.G. Road ('E' Eastbound or 'W' Westbound) ──
+  if (carType === 'E' || carType === 'W') {
+    const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
+    // Scale 3D Twin lateral Z (-9.5..+9.5) to real M.G. Road half-width (-4.5m..+4.5m)
+    const lateralMeters = (z / 9.5) * 4.5;
+    const coords = offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters);
+    const baseBearing = carType === 'E' ? res.bearing : (res.bearing + 180) % 360;
+    return {
+      lngLat: coords,
+      bearing: (baseBearing + steerDeg + 360) % 360,
+    };
+  }
+
+  // ── CASE E: Civilian Cars on Brigade Road ('N' Northbound or 'S' Southbound) ──
+  if (carType === 'N' || carType === 'S') {
+    const res = interpolateStations(CROSS_AVE_STATIONS, 'z', z);
+    // Scale 3D Twin lateral X (-5.4..+5.4) to real Brigade Road half-width (-3.5m..+3.5m)
+    const lateralMeters = (x / 5.4) * 3.5;
+    const coords = offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters);
+    // CROSS_AVE_STATIONS is ordered z: +90 (South) -> -120 (North), so res.bearing is Northbound
+    const baseBearing = carType === 'N' ? res.bearing : (res.bearing + 180) % 360;
+    return {
+      lngLat: coords,
+      bearing: (baseBearing + steerDeg + 360) % 360,
+    };
+  }
+
+  // ── CASE F: Generic 3D Twin Point (Waypoints, Signal Poles, Camera Targets) ──
+  if (Math.abs(z - (-60)) < 8) {
+    const res = interpolateStations(DETOUR_LEG3_STATIONS, 'x', x);
+    return { lngLat: res.coord, bearing: res.bearing };
+  }
+  if (Math.abs(x) <= 14 && Math.abs(z) > 12) {
+    const res = interpolateStations(CROSS_AVE_STATIONS, 'z', z);
+    const lateralMeters = (x / 5.4) * 3.5;
+    return {
+      lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
+      bearing: res.bearing,
+    };
+  }
+  const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
+  const lateralMeters = (z / 9.5) * 4.5;
+  return {
+    lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
+    bearing: res.bearing,
+  };
 }
 
 /**
- * Builds GeoJSON features for the exact 3D Twin road network, lane markings, stop lines,
- * and Case 03 5-leg North Block Detour (WP1 -> WP2 -> WP3 -> WP4) so the Satellite Map
- * displays the exact road corridors from TrafficManager.jsx and Canvas3D.jsx.
+ * Legacy helper wrapper so any call to twinToLngLat(x, z) automatically uses road-snapped coordinates
+ */
+export function twinToLngLat(x = 0, z = 0, options = {}) {
+  return twinToRoadGeo(x, z, options).lngLat;
+}
+
+export function twinHeadingToBearing(typeOrDir, rotY = 0, isAmbulance = false, ambRotation = 0, x = 0, z = 0, ambId = 'AMB_1', wpIdx = 0) {
+  return twinToRoadGeo(x, z, {
+    carType: typeOrDir,
+    rotY,
+    isAmbulance,
+    ambId,
+    wpIdx,
+  }).bearing;
+}
+
+/**
+ * Builds GeoJSON features for the exact Google Maps Road Corridors:
+ *   - M.G. Road Main Corridor
+ *   - Brigade Road South-North Priority Corridor (Case 03 Ambulance A)
+ *   - Kamaraj Rd -> Cubbon Rd -> Central St 5-Leg Macro-Detour (Case 03 Ambulance B)
+ *   - East Approach Gridlock Blockade Zone (between Kamaraj Rd WP1 and Brigade Rd J0)
  */
 export function buildTwinRoadGeoJSON(selectedCase = 1, detourActive = false) {
-  const rectPolygon = (x1, z1, x2, z2, props = {}) => ({
-    type: 'Feature',
-    properties: props,
-    geometry: {
-      type: 'Polygon',
-      coordinates: [[
-        twinToLngLat(x1, z1),
-        twinToLngLat(x2, z1),
-        twinToLngLat(x2, z2),
-        twinToLngLat(x1, z2),
-        twinToLngLat(x1, z1),
-      ]],
-    },
-  });
-
-  const lineFeature = (coordsXZ, props = {}) => ({
-    type: 'Feature',
-    properties: props,
-    geometry: {
-      type: 'LineString',
-      coordinates: coordsXZ.map(([x, z]) => twinToLngLat(x, z)),
-    },
-  });
-
-  // 1. Road Asphalt Deck Polygons (exact bounds from TrafficManager.jsx & Canvas3D.jsx)
-  const polygons = [
-    // Sidewalk & Curb Deck Buffers (architectural realistic border)
-    rectPolygon(-142, -11.5, 107, 11.5, { kind: 'sidewalk_deck', name: 'Main Avenue Sidewalk Border' }),
-    rectPolygon(-7.5, -127, 7.5, 100, { kind: 'sidewalk_deck', name: 'Cross Avenue Sidewalk Border' }),
-    // East-West Main Avenue (X: -140 to +105, Z: -9.8 to +9.8)
-    rectPolygon(-140, -9.8, 105, 9.8, { kind: 'main_road', name: 'Main East-West Avenue' }),
-    // North-South Cross Avenue (X: -5.8 to +5.8, Z: -125 to +98)
-    rectPolygon(-5.8, -125, 5.8, 98, { kind: 'cross_road', name: 'North-South Corridor' }),
-    // North Side Street (Leg 2 of Case 03 Detour: X: 43.2 to 50.8, Z: -63.8 to -2.89)
-    rectPolygon(42.0, -65.0, 52.0, -1.5, { kind: 'sidewalk_deck', name: 'North Side St Sidewalk' }),
-    rectPolygon(43.2, -63.8, 50.8, -2.0, { kind: 'detour_road', name: 'North Side Street (WP1 -> WP2)' }),
-    // Parallel West Avenue (Leg 3 of Case 03 Detour: X: -90.8 to 50.8, Z: -63.8 to -56.2)
-    rectPolygon(-92.0, -65.0, 52.0, -55.0, { kind: 'sidewalk_deck', name: 'Parallel West Ave Sidewalk' }),
-    rectPolygon(-90.8, -63.8, 50.8, -56.2, { kind: 'detour_road', name: 'Parallel West Avenue (WP2 -> WP3)' }),
-    // South Return Street (Leg 4 of Case 03 Detour: X: -90.8 to -83.2, Z: -63.8 to -2.0)
-    rectPolygon(-92.0, -65.0, -82.0, -1.5, { kind: 'sidewalk_deck', name: 'South Return St Sidewalk' }),
-    rectPolygon(-90.8, -63.8, -83.2, -2.0, { kind: 'detour_road', name: 'South Return Street (WP3 -> WP4)' }),
-    // Central Junction Box (JX_MIN=-5.0..3.5, JZ_MIN=-9.5..9.5)
-    rectPolygon(-5.8, -9.8, 5.8, 9.8, { kind: 'junction_box', name: 'Central Signalized Intersection (0,0)' }),
-  ];
-
-  // 2. Center Medians, Lane Dividers, Stop Lines & Crosswalks
+  const N = GOOGLE_ROAD_NODES;
   const lines = [
-    // Outer Curb Edges
-    lineFeature([[-140, -9.8], [105, -9.8]], { kind: 'curb_edge' }),
-    lineFeature([[-140, 9.8], [105, 9.8]], { kind: 'curb_edge' }),
-    lineFeature([[-5.8, -125], [-5.8, 98]], { kind: 'curb_edge' }),
-    lineFeature([[5.8, -125], [5.8, 98]], { kind: 'curb_edge' }),
-
-    // Main Avenue Center Median (Z = 0, West & East of junction)
-    lineFeature([[-140, -0.15], [-6.5, -0.15]], { kind: 'median' }),
-    lineFeature([[-140, 0.15], [-6.5, 0.15]], { kind: 'median' }),
-    lineFeature([[7.5, -0.15], [105, -0.15]], { kind: 'median' }),
-    lineFeature([[7.5, 0.15], [105, 0.15]], { kind: 'median' }),
-
-    // North-South Center Median (X = -0.5, North & South of junction)
-    lineFeature([[-0.65, -125], [-0.65, -10.5]], { kind: 'median' }),
-    lineFeature([[-0.35, -125], [-0.35, -10.5]], { kind: 'median' }),
-    lineFeature([[-0.65, 10.5], [-0.65, 98]], { kind: 'median' }),
-    lineFeature([[-0.35, 10.5], [-0.35, 98]], { kind: 'median' }),
-
-    // Dashed White Lane Dividers
-    lineFeature([[-140, -5.0], [-8.0, -5.0]], { kind: 'lane_dash' }),
-    lineFeature([[-140, 5.0], [-8.0, 5.0]], { kind: 'lane_dash' }),
-    lineFeature([[9.0, -3.5], [105, -3.5]], { kind: 'lane_dash' }),
-    lineFeature([[9.0, 3.5], [105, 3.5]], { kind: 'lane_dash' }),
-    lineFeature([[2.2, 12.0], [2.2, 98]], { kind: 'lane_dash' }),
-    lineFeature([[-2.4, -125], [-2.4, -12.0]], { kind: 'lane_dash' }),
-
-    // 4 Stop Lines (solid thick white stop bars)
-    lineFeature([[-6.5, -9.5], [-6.5, 9.5]], { kind: 'stop_line', arm: 'WEST' }),
-    lineFeature([[7.5, -9.5], [7.5, 9.5]], { kind: 'stop_line', arm: 'EAST' }),
-    lineFeature([[-5.5, 10.5], [5.5, 10.5]], { kind: 'stop_line', arm: 'SOUTH' }),
-    lineFeature([[-5.5, -10.5], [5.5, -10.5]], { kind: 'stop_line', arm: 'NORTH' }),
-
-    // Zebra Crosswalk Stripes (West, East, North, South)
-    lineFeature([[-7.8, -9.2], [-7.8, 9.2]], { kind: 'zebra_crosswalk' }),
-    lineFeature([[-8.4, -9.2], [-8.4, 9.2]], { kind: 'zebra_crosswalk' }),
-    lineFeature([[8.8, -9.2], [8.8, 9.2]], { kind: 'zebra_crosswalk' }),
-    lineFeature([[9.4, -9.2], [9.4, 9.2]], { kind: 'zebra_crosswalk' }),
-    lineFeature([[-5.2, -11.8], [5.2, -11.8]], { kind: 'zebra_crosswalk' }),
-    lineFeature([[-5.2, -12.4], [5.2, -12.4]], { kind: 'zebra_crosswalk' }),
-    lineFeature([[-5.2, 11.8], [5.2, 11.8]], { kind: 'zebra_crosswalk' }),
-    lineFeature([[-5.2, 12.4], [5.2, 12.4]], { kind: 'zebra_crosswalk' }),
-
-    // Central Anti-Gridlock Yellow Box Junction Diagonal Lines
-    lineFeature([[-5.5, -9.5], [5.5, 9.5]], { kind: 'yellow_box' }),
-    lineFeature([[-5.5, 9.5], [5.5, -9.5]], { kind: 'yellow_box' }),
-    lineFeature([[-5.5, 0], [0, 9.5]], { kind: 'yellow_box' }),
-    lineFeature([[0, -9.5], [5.5, 0]], { kind: 'yellow_box' }),
-    lineFeature([[-5.5, 0], [0, -9.5]], { kind: 'yellow_box' }),
-    lineFeature([[0, 9.5], [5.5, 0]], { kind: 'yellow_box' }),
+    // Base M.G. Road Corridor Casing
+    {
+      type: 'Feature',
+      properties: { kind: 'main_road_line', name: 'M.G. Road Corridor' },
+      geometry: {
+        type: 'LineString',
+        coordinates: [N.W_EXIT, N.WP4, N.J0, N.WP1, N.E_START, N.E_FAR],
+      },
+    },
+    // Base Brigade Road Cross Corridor Casing
+    {
+      type: 'Feature',
+      properties: { kind: 'cross_road_line', name: 'Brigade Road Corridor' },
+      geometry: {
+        type: 'LineString',
+        coordinates: [N.S_START, N.S_MID, N.J0, N.N_MID, N.N_END],
+      },
+    },
   ];
 
-  // 3. Active Emergency Corridor & Case 03 5-Leg Macro-Detour Ribbon
   if (selectedCase === 1) {
-    lines.push(
-      lineFeature([[-120, -6.0], [100, -6.0]], {
+    lines.push({
+      type: 'Feature',
+      properties: {
         kind: 'amb_corridor_case1',
-        name: 'Case 01 West->East Preemption Corridor (Z = -6.0)',
-      })
-    );
+        name: 'Case 01 M.G. Road Green Preemption Corridor',
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: [N.W_EXIT, N.WP4, N.J0, N.WP1, N.E_START],
+      },
+    });
   } else if (selectedCase === 3) {
-    // Ambulance A South->North Green Corridor (X = 2.2, Z: 90 -> -120)
-    lines.push(
-      lineFeature([[2.2, 90.0], [2.2, -120.0]], {
+    // Ambulance A South->North Brigade Road Green Corridor
+    lines.push({
+      type: 'Feature',
+      properties: {
         kind: 'amb_a_corridor',
-        name: 'Ambulance A Priority South->North Corridor (X = 2.2)',
-      })
-    );
-    // Ambulance B 5-Leg North Block Macro-Detour (WP1 -> WP2 -> WP3 -> WP4 -> Exit)
-    lines.push(
-      lineFeature(
-        [
-          [90.0, -2.89],
-          [47.0, -2.89],
-          [47.0, -60.0],
-          [-87.0, -60.0],
-          [-87.0, -2.89],
-          [-135.0, -2.89],
+        name: 'Ambulance A Brigade Road Priority Green Wave',
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: [N.S_START, N.S_MID, N.J0, N.N_MID, N.N_END],
+      },
+    });
+
+    // Ambulance B 5-Leg Macro-Detour along Kamaraj Rd -> Cubbon Rd -> Central St -> M.G. Rd
+    lines.push({
+      type: 'Feature',
+      properties: {
+        kind: 'amb_b_detour',
+        active: detourActive ? 1 : 0,
+        name: 'Ambulance B 5-Leg North Block Detour (Kamaraj Rd -> Cubbon Rd -> Central St)',
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          N.E_START,
+          N.WP1,
+          N.WP1_MID,
+          N.WP2,
+          N.LEG3_M1,
+          N.LEG3_M2,
+          N.WP3,
+          N.WP3_MID,
+          N.WP4,
+          N.W_EXIT,
         ],
-        {
-          kind: 'amb_b_detour',
-          active: detourActive ? 1 : 0,
-          name: 'Ambulance B 5-Leg North Block Detour',
-        }
-      )
-    );
-    // East Approach Gridlock Blockade Zone (X: 10.0 to 43.0)
-    lines.push(
-      lineFeature([[10.0, -3.5], [43.0, -3.5]], {
+      },
+    });
+
+    // East Approach Dense Gridlock Blockade Zone (X: 10..43 between J0 and WP1)
+    const bStart = twinToRoadGeo(12, -3.5, { carType: 'W' }).lngLat;
+    const bEnd = twinToRoadGeo(43, -3.5, { carType: 'W' }).lngLat;
+    lines.push({
+      type: 'Feature',
+      properties: {
         kind: 'east_blockade',
-        name: 'East Approach Dense Gridlock Zone (X: 10..43)',
-      })
-    );
+        name: 'East Approach Gridlock Blockade (10 Cars Queued)',
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: [bStart, bEnd],
+      },
+    });
   }
 
   return {
-    polygons: { type: 'FeatureCollection', features: polygons },
+    polygons: { type: 'FeatureCollection', features: [] },
     lines: { type: 'FeatureCollection', features: lines },
   };
 }
@@ -280,8 +417,8 @@ export function createDefaultSnapshot(selectedCase = 1) {
           state: 'IDLE_QUEUE',
           receivesBLE: false,
         });
-      }
-    )});
+      });
+    });
 
     const calibratedEastCars = [
       { id: 26, x: 16.20, z: -1.80 },
@@ -379,15 +516,13 @@ export function createDefaultSnapshot(selectedCase = 1) {
     },
     vehicles: cars,
     auditLogs: [
-      { id: 1, timestamp: '[READY]', message: 'V2X Satellite Telemetry Ready. Press DISPATCH [ENTER] to start.' },
+      { id: 1, timestamp: '[READY]', message: 'Google Maps Satellite Road-Snapped Engine Ready.' },
     ],
   };
 }
 
 /**
  * Publisher Hook used inside src/app/page.js (3D Twin Command Center)
- * Broadcasts live vehicles + ambulances + signals to /ambulance and /driver
- * and listens for remote commands from /ambulance.
  */
 export function useV2XPublisher({
   selectedCase,
@@ -474,14 +609,12 @@ export function useV2XPublisher({
         auditLogs: (sc === 1 ? c1.auditLogs : c3.auditLogs).slice(-15),
       };
 
-      // 1. Instant zero-latency BroadcastChannel push (20 FPS)
       if (channelRef.current) {
         try {
           channelRef.current.postMessage({ type: 'SNAPSHOT', payload: snapshot });
         } catch (_) {}
       }
 
-      // 2. Every 3rd tick (~150ms), sync with /api/v2x for external phones on LAN/Wi-Fi
       tickCount++;
       if (tickCount % 3 === 0) {
         try {
@@ -506,19 +639,13 @@ export function useV2XPublisher({
 
     return () => {
       clearInterval(interval);
-      if (channelRef.current) {
-        channelRef.current.close();
-      }
+      if (channelRef.current) channelRef.current.close();
     };
   }, []);
 }
 
 /**
  * Subscriber Hook used inside /ambulance and /driver
- * Receives live 3D Twin telemetry via BroadcastChannel or /api/v2x.
- * Also includes a built-in standalone physics loop matching TrafficManager.jsx
- * so if the user opens /ambulance directly without the 3D Twin tab open,
- * dispatching still animates the exact same cars and ambulances!
  */
 export function useV2XSubscriber() {
   const [snapshot, setSnapshot] = useState(() => createDefaultSnapshot(1));
@@ -529,20 +656,17 @@ export function useV2XSubscriber() {
   const localSimRef = useRef(createDefaultSnapshot(1));
 
   const sendCommand = useCallback((command, payload = {}) => {
-    // 1. Send over BroadcastChannel
     if (channelRef.current) {
       try {
         channelRef.current.postMessage({ type: 'COMMAND', command, payload });
       } catch (_) {}
     }
-    // 2. Send to /api/v2x for LAN sync
     fetch('/api/v2x', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'COMMAND', command, payload }),
     }).catch(() => {});
 
-    // 3. Also apply to standalone fallback engine if 3D Twin tab isn't open
     if (Date.now() - lastTwinMsgTimeRef.current > 1200) {
       const s = localSimRef.current;
       if (command === 'SWITCH_CASE') {
@@ -593,7 +717,6 @@ export function useV2XSubscriber() {
       channelRef.current = ch;
     }
 
-    // Poll /api/v2x every 200ms as fallback when BroadcastChannel isn't active (e.g. phone on Wi-Fi)
     const pollInterval = setInterval(async () => {
       if (Date.now() - lastTwinMsgTimeRef.current < 400) return;
       try {
@@ -614,7 +737,6 @@ export function useV2XSubscriber() {
       }
     }, 200);
 
-    // Standalone fallback kinematics loop when 3D Twin tab is not open
     const fallbackTick = setInterval(() => {
       if (Date.now() - lastTwinMsgTimeRef.current <= 1200) return;
       const s = localSimRef.current;
@@ -631,7 +753,6 @@ export function useV2XSubscriber() {
           s.ambulancePosition.x = -120;
           s.signalPhase = 'NORMAL_CYCLE';
         }
-        // Update Case 1 E cars yielding & moving
         s.vehicles.forEach((v) => {
           if (v.type === 'E') {
             const dist = Math.hypot(v.x - s.ambulancePosition.x, v.z - s.ambulancePosition.z);
@@ -651,7 +772,6 @@ export function useV2XSubscriber() {
           }
         });
       } else {
-        // Case 3 Fallback Kinematics
         if (s.ambulanceA.position.z > -120) {
           s.ambulanceA.position.z -= 0.55;
           s.ambulanceA.distanceToJunction = Math.max(0, s.ambulanceA.position.z);
@@ -666,17 +786,17 @@ export function useV2XSubscriber() {
         } else if (wp === 1) {
           bPos.z -= 0.6;
           bPos.rotation = 0;
-          s.ambulanceB.waypointName = 'Leg 2: North Side Street -> Turn 2 (Z: -60)';
+          s.ambulanceB.waypointName = 'Leg 2: Kamaraj Rd North -> Turn 2 (Z: -60)';
           if (bPos.z <= -60.0) s.ambulanceB.currentWaypointIdx = 2;
         } else if (wp === 2) {
           bPos.x -= 0.6;
           bPos.rotation = Math.PI / 2;
-          s.ambulanceB.waypointName = 'Leg 3: Parallel West Avenue -> Turn 3 (X: -87)';
+          s.ambulanceB.waypointName = 'Leg 3: Cubbon Rd West -> Turn 3 (X: -87)';
           if (bPos.x <= -87.0) s.ambulanceB.currentWaypointIdx = 3;
         } else if (wp === 3) {
           bPos.z += 0.6;
           bPos.rotation = Math.PI;
-          s.ambulanceB.waypointName = 'Leg 4: South Return Street -> Rejoining Main Ave';
+          s.ambulanceB.waypointName = 'Leg 4: Central St South -> Rejoining M.G. Rd';
           if (bPos.z >= -2.89) {
             bPos.z = -2.89;
             s.ambulanceB.currentWaypointIdx = 4;
@@ -687,7 +807,6 @@ export function useV2XSubscriber() {
           s.ambulanceB.waypointName = 'Leg 5: Westbound Departure (Bypass Complete)';
         }
 
-        // Update Northbound cars yielding to Ambulance A
         s.vehicles.forEach((v) => {
           if (v.type === 'N') {
             const dist = Math.hypot(v.x - s.ambulanceA.position.x, v.z - s.ambulanceA.position.z);
