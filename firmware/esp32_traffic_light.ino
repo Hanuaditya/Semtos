@@ -31,47 +31,49 @@
 #include <WebServer.h>
 
 // ── Wi-Fi Hotspot Configuration ─────────────────────────────────────────────
-// Enter your personal phone hotspot or home Wi-Fi credentials here:
-const char* WIFI_SSID     = "MyHotspot";      // <--- Change to your phone hotspot name
-const char* WIFI_PASSWORD = "password123";    // <--- Change to your phone hotspot password
+const char* WIFI_SSID     = "H";
+const char* WIFI_PASSWORD = "123456798";
 
 // Fallback SoftAP Configuration (Used if hotspot is unreachable)
 const char* AP_SSID       = "SEMTOS-TRAFFIC-AP";
 const char* AP_PASSWORD   = "semtos1234";
 
-const int PIN_RED    = 25;
-const int PIN_YELLOW = 26;
-const int PIN_GREEN  = 27;
+// ── Physical Pin Mapping (Matches user hardware wiring) ─────────────────────
+const int PIN_RED    = 18;
+const int PIN_YELLOW = 19;
+const int PIN_GREEN  = 21;
+const int STATUS_LED = 2;  // Onboard blue LED (preemption strobe)
 
 WebServer server(80);
 char currentCommand = 'R';
 
-void setSignal(int redState, int yellowState, int greenState) {
+void setSignal(int redState, int yellowState, int greenState, int statusState = LOW) {
   digitalWrite(PIN_RED, redState);
   digitalWrite(PIN_YELLOW, yellowState);
   digitalWrite(PIN_GREEN, greenState);
+  digitalWrite(STATUS_LED, statusState);
 }
 
 void applyCommand(char cmd) {
   currentCommand = cmd;
   switch (cmd) {
-    case 'P': // Emergency Corridor Active (Preemption Green)
-      setSignal(LOW, LOW, HIGH);
+    case 'P': // Emergency Corridor Active (Preemption Green + Status LED)
+      setSignal(LOW, LOW, HIGH, HIGH);
       Serial.println(F("[SEMTOS] -> PREEMPTION GREEN ('P') ACTIVE"));
       break;
 
     case 'G': // Normal Green
-      setSignal(LOW, LOW, HIGH);
+      setSignal(LOW, LOW, HIGH, LOW);
       Serial.println(F("[SEMTOS] -> NORMAL GREEN ('G') ACTIVE"));
       break;
 
     case 'Y': // Yellow Transition
-      setSignal(LOW, HIGH, LOW);
+      setSignal(LOW, HIGH, LOW, LOW);
       Serial.println(F("[SEMTOS] -> YELLOW ('Y') TRANSITION"));
       break;
 
     case 'R': // Red
-      setSignal(HIGH, LOW, LOW);
+      setSignal(HIGH, LOW, LOW, LOW);
       Serial.println(F("[SEMTOS] -> RED ('R') HOLD"));
       break;
 
@@ -126,9 +128,10 @@ void setup() {
   pinMode(PIN_RED, OUTPUT);
   pinMode(PIN_YELLOW, OUTPUT);
   pinMode(PIN_GREEN, OUTPUT);
+  pinMode(STATUS_LED, OUTPUT);
 
   // Safety Default on Boot: Solid Red (Stop / Hold)
-  setSignal(HIGH, LOW, LOW);
+  setSignal(HIGH, LOW, LOW, LOW);
 
   Serial.println();
   Serial.println(F("=================================================="));
