@@ -11,8 +11,11 @@ export function DashboardOverlay({
   ambulancePosition, 
   distanceToIntersection, 
   isPreempted, 
-  systemStatus,
-  auditLogs,
+  deadlockDetected = false,
+  detourActive = false,
+  waypointName = '',
+  systemStatus = 'NOMINAL',
+  auditLogs = [],
   manualOverride,
   toggleManualOverride
 }) {
@@ -63,6 +66,14 @@ export function DashboardOverlay({
             </div>
           </div>
 
+          {/* DEADLOCK NOTIFICATION BANNER */}
+          {deadlockDetected && (
+            <div className="bg-red-600/90 border-2 border-red-400 shadow-[0_0_30px_rgba(239,68,68,0.7)] text-white px-6 py-2.5 rounded-lg flex items-center gap-3 animate-pulse font-mono font-bold text-sm tracking-wider">
+              <AlertTriangle className="text-yellow-300" size={20} />
+              <span>DEADLOCK DETECTED: AMBULANCE B REROUTING VIA NORTH BLOCK</span>
+            </div>
+          )}
+
           <div className="bg-slate-900/80 backdrop-blur-md border border-slate-700 p-4 rounded shadow-2xl flex flex-col items-end min-w-[200px]">
             <div className="text-sm text-slate-400 tracking-widest">UTC: <span className="text-slate-100">{time}</span></div>
             <div className={cn(
@@ -71,7 +82,7 @@ export function DashboardOverlay({
                 ? 'bg-slate-800 text-slate-400 border border-slate-600' 
                 : 'bg-red-900/30 text-red-400 border border-red-500 animate-pulse'
             )}>
-              STATUS: {systemStatus}
+              STATUS: {deadlockDetected ? 'MACRO-DETOUR' : systemStatus}
             </div>
           </div>
         </header>
@@ -86,15 +97,21 @@ export function DashboardOverlay({
             </h2>
             <div className="grid grid-cols-2 gap-4 flex-1">
               <div className="bg-slate-950/50 border border-slate-800 rounded p-4 flex flex-col justify-center">
-                <span className="text-xs text-slate-500 mb-1 tracking-wider">DISTANCE TO I/S</span>
-                <span className={cn("text-3xl font-bold tracking-wider", isPreempted ? "text-red-500" : "text-emerald-400")}>
-                  {Math.round(distanceToIntersection)} <span className="text-lg text-slate-600">m</span>
+                <span className="text-xs text-slate-500 mb-1 tracking-wider">
+                  {detourActive ? "AMB B WAYPOINT" : "DISTANCE TO I/S"}
+                </span>
+                <span className={cn("text-2xl font-bold tracking-wider", isPreempted ? "text-amber-400" : "text-emerald-400")}>
+                  {detourActive ? (waypointName || "DETOUR ACTIVE") : `${Math.round(distanceToIntersection || 0)} m`}
                 </span>
               </div>
               <div className="bg-slate-950/50 border border-slate-800 rounded p-4 flex flex-col justify-center">
-                <span className="text-xs text-slate-500 mb-1 tracking-wider">Z-COORDINATE</span>
-                <span className="text-3xl font-bold text-blue-400 tracking-wider">
-                  {ambulancePosition.z.toFixed(1)}
+                <span className="text-xs text-slate-500 mb-1 tracking-wider">
+                  {detourActive ? "AMB B COORDS (X / Z)" : "Z-COORDINATE"}
+                </span>
+                <span className="text-xl font-bold text-blue-400 tracking-wider">
+                  {detourActive
+                    ? `${ambulancePosition?.x?.toFixed(1) || 0} / ${ambulancePosition?.z?.toFixed(1) || 0}`
+                    : ambulancePosition?.z?.toFixed(1) || 0}
                 </span>
               </div>
               <div className="col-span-2 relative overflow-hidden group flex flex-col justify-end mt-2">

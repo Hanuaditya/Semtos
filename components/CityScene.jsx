@@ -10,6 +10,7 @@ export function CityScene({ isPreempted }) {
     
     scene.traverse((child) => {
       if (child.isMesh) {
+        child.frustumCulled = true;
         const meshName = child.name?.toLowerCase() || '';
         
         // 1. Check by standard mesh name (The Dragnet)

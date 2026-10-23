@@ -15,7 +15,7 @@ const JX_MAX =  3.5;  // East edge of N/S road
 const JZ_MIN = -9.5;  // South edge of E/W road
 const JZ_MAX =  9.5;  // North edge of E/W road
 
-export function TrafficManager({ ambulancePosition, isPreempted, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false, isFrozen, editMode, boundaryMode }) {
+export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempted, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false, isFrozen, editMode, boundaryMode, externalVehiclesRef }) {
   // ── ROAD BOUNDARIES (FOOTPATH PROTECTION) ──
   const [boundaries, setBoundaries] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -40,88 +40,243 @@ export function TrafficManager({ ambulancePosition, isPreempted, nGreen=false, s
   const car2 = useGLTF('/car2.glb');
   const car3 = useGLTF('/car3.glb');
 
+  // Enable hardware frustum culling on all civilian car GLBs
+  useEffect(() => {
+    [car1.scene, car2.scene, car3.scene].forEach((s) => {
+      if (!s) return;
+      s.traverse((child) => {
+        if (child.isMesh) child.frustumCulled = true;
+      });
+    });
+  }, [car1.scene, car2.scene, car3.scene]);
+
   const models = [
     { scene: car1.scene, yOffsetRot: Math.PI },
     { scene: car2.scene, yOffsetRot: 0       },
     { scene: car3.scene, yOffsetRot: 0       },
   ];
 
-  const vehiclesRef = useRef(null);
+  const frustumRef = useRef(new THREE.Frustum());
+  const projScreenMatrixRef = useRef(new THREE.Matrix4());
+
+  const localVehiclesRef = useRef(null);
+  const vehiclesRef = externalVehiclesRef || localVehiclesRef;
+  const prevCaseRef = useRef(null);
+
+  // If case mode switches, reinitialize vehicles for the selected case
+  if (prevCaseRef.current !== selectedCase) {
+    prevCaseRef.current = selectedCase;
+    vehiclesRef.current = [];
+  }
   
-  if (!vehiclesRef.current) {
+  if (!vehiclesRef.current || vehiclesRef.current.length === 0) {
     const cars = [];
-    const lanes = [
-      // NORTHBOUND (Moving -Z). Stop BEFORE junction south edge (z=11).
-      // perpHome X must be between 0 and right=3.44.
-      // Spread lanes 1.5 units apart so bodies don't overlap.
-      { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 2.5, pullOverPerp: 3.1, stopLine: 11, wrapPos: -SPAWN_DISTANCE - 20, startPos: SPAWN_DISTANCE },
-      { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 1.0, pullOverPerp: 2.5, stopLine: 11, wrapPos: -SPAWN_DISTANCE - 20, startPos: SPAWN_DISTANCE },
-
-      // SOUTHBOUND (Moving +Z). Stop BEFORE junction north edge (z=-11).
-      // perpHome X must be between left=-3.69 and 0.
-      // Old -4.0 was OUTSIDE boundary — now fixed to -3.1.
-      { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -3.1, pullOverPerp: -3.4, stopLine: -11, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-      { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -1.8, pullOverPerp: -3.2, stopLine: -11, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-
-      // EASTBOUND (Moving +X). Stop BEFORE junction west edge.
-      // Z must stay within top=-9.58 … bottom=-1.24.
-      { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -7.5, pullOverPerp: -9.0, stopLine: -7, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-      { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -4.5, pullOverPerp: -2.0, stopLine: -7, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-
-      // WESTBOUND (Moving -X). Stop BEFORE junction east edge.
-      // Z must stay within westBottom=1.24 … westTop=9.58.
-      { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 4.5, pullOverPerp: 1.5, stopLine: 6, wrapPos: -SPAWN_DISTANCE - 10, startPos: SPAWN_DISTANCE },
-      { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 7.5, pullOverPerp: 9.0, stopLine: 6, wrapPos: -SPAWN_DISTANCE - 10, startPos: SPAWN_DISTANCE },
-    ];
-
     let idCount = 1;
-    for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
-      const lane = lanes[laneIdx];
-      // Eastbound approach gets 9 cars for visual density (long straight road).
-      // N/S approaches get only 3 cars each so they stay within the visible road bounds.
-      // E/W westbound get 4 cars.
-      const carCount = (lane.dir === 'E') ? 9 : (lane.dir === 'N' || lane.dir === 'S') ? 3 : 4;
-      // Use a lane-index stagger (5 units) so adjacent-lane cars don't line up exactly.
-      const laneStagger = (laneIdx % 2) * 5;
-      // Spacing: 7 units for E lane (9 cars), 8 units for others (tight-but-visible queue)
-      const spacing = (lane.dir === 'E') ? 7 : 8;
 
-      for (let i = 0; i < carCount; i++) {
-        // posParallel: each car sits behind the stop line by (2 + stagger + i*spacing) units
-        const posParallel = lane.stopLine - (lane.sign * (2 + laneStagger + i * spacing));
+    if (selectedCase === 3) {
+      // ══════════════════════════════════════════════════════════════════════
+      // CASE 03: REFINED CARRIAGEWAY SWAP & EAST VISUAL GRIDLOCK BLOCKADE
+      // ══════════════════════════════════════════════════════════════════════
 
+      // 1. NORTHBOUND (South Approach heading North -Z, Ambulance A Corridor at X = 2.2)
+      // Left lane (X = 1.2): Pull-over target against median edge X = 1.0
+      // Right lane (X = 3.4): Pull-over target against curb shoulder X = 5.0
+      // Front queue (Z < 25.0): Z = 16.0, 19.0 flushes through green signal ahead of Ambulance A
+      // Trailing queue (Z >= 25.0): Z = 36.0, 42.0, 58.0, 66.0 yields laterally via BLE
+      const nLanes = [
+        { perpHome: 1.2, pullOverPerp: 1.0, zPositions: [16.0, 36.0, 58.0] },
+        { perpHome: 3.4, pullOverPerp: 5.0, zPositions: [19.0, 42.0, 66.0] },
+      ];
+      nLanes.forEach((lane) => {
+        lane.zPositions.forEach((zPos) => {
+          cars.push({
+            id: idCount++,
+            type: 'N',
+            modelIdx: idCount % 3,
+            axis: 'z',
+            perpAxis: 'x',
+            sign: -1,
+            homePerp: lane.perpHome,
+            pullOverPerp: lane.pullOverPerp,
+            targetPerp: lane.perpHome,
+            wrapPos: -SPAWN_DISTANCE - 20,
+            startPos: SPAWN_DISTANCE,
+            stopLine: 11,
+            pos: new THREE.Vector3(lane.perpHome, 0.2, zPos),
+            rotY: 0,
+            receivesBLE: false,
+            speed: 0,
+            state: 'IDLE_QUEUE',
+          });
+        });
+      });
+
+      // 2. SOUTHBOUND (North Approach heading South +Z)
+      const sLanes = [
+        { perpHome: -3.1, stopLine: -11, sign: 1, carCount: 3, stagger: 0 },
+        { perpHome: -1.8, stopLine: -11, sign: 1, carCount: 3, stagger: 4 },
+      ];
+      sLanes.forEach((lane) => {
+        for (let i = 0; i < lane.carCount; i++) {
+          const zPos = lane.stopLine - lane.sign * (3 + lane.stagger + i * 8);
+          cars.push({
+            id: idCount++,
+            type: 'S',
+            modelIdx: idCount % 3,
+            axis: 'z',
+            perpAxis: 'x',
+            sign: 1,
+            homePerp: lane.perpHome,
+            pullOverPerp: -3.4,
+            targetPerp: lane.perpHome,
+            wrapPos: SPAWN_DISTANCE,
+            startPos: -SPAWN_DISTANCE - 10,
+            stopLine: lane.stopLine,
+            pos: new THREE.Vector3(lane.perpHome, 0.2, zPos),
+            rotY: 0,
+            receivesBLE: false,
+            speed: 0,
+            state: 'IDLE_QUEUE',
+          });
+        }
+      });
+
+      // 3. WEST APPROACH (Facing East +X) — Shifted to Right (+Z) Carriageway
+      // Telemetry: X: -90.49, Z: 4.65, FACING: EAST (+X)
+      // Lanes: Inner (Z = 1.8), Center (Z = 3.5), Outer (Z = 5.2)
+      // Bounds: X = -85.0 to X = -12.0
+      const westApproachLanes = [
+        { perpHome: 1.8, xPositions: [-13.0, -23.0, -35.0, -48.0] },
+        { perpHome: 3.5, xPositions: [-16.0, -27.0, -39.0, -53.0] },
+        { perpHome: 5.2, xPositions: [-19.0, -31.0, -44.0, -59.0] },
+      ];
+      westApproachLanes.forEach((lane) => {
+        lane.xPositions.forEach((xPos) => {
+          cars.push({
+            id: idCount++,
+            type: 'E',
+            modelIdx: idCount % 3,
+            axis: 'x',
+            perpAxis: 'z',
+            sign: 1,
+            homePerp: lane.perpHome,
+            pullOverPerp: lane.perpHome,
+            targetPerp: lane.perpHome,
+            wrapPos: SPAWN_DISTANCE,
+            startPos: -SPAWN_DISTANCE - 20,
+            stopLine: -8,
+            pos: new THREE.Vector3(xPos, 0.2, lane.perpHome),
+            rotY: 0,
+            receivesBLE: false,
+            speed: 0,
+            state: 'IDLE_QUEUE',
+          });
+        });
+      });
+
+      // 4. EAST APPROACH (Facing West -X) — Shifted to Right (-Z) Carriageway (Ambulance B Corridor)
+      // Target Lanes: Inner (Z = -1.8), Center (Z = -3.4), Outer (Z = -5.2)
+      // DENSE GRIDLOCK: 14 civilian cars strictly between X = 10.0 and X = 43.0!
+      // CRITICAL: X > 44.0 is COMPLETELY CLEAR so Ambulance B approaches with full visibility
+      // and cleanly executes its 90° right turn at Waypoint 1 (X = 47.0) with zero clipping!
+      const calibratedEastCars = [
+        { id: 26, x: 16.20, z: -1.80 },
+        { id: 27, x: 25.98, z: -2.43 },
+        { id: 29, x: 42.00, z: -2.35 },
+        { id: 31, x: 20.85, z: -3.69 },
+        { id: 32, x: 26.82, z: -5.06 },
+        { id: 34, x: 42.72, z: -5.77 },
+        { id: 35, x: 15.65, z: -5.20 },
+        { id: 36, x: 21.43, z: -5.54 }, // Fixed from -7.99 to stay off the footpath
+        { id: 37, x: 30.77, z: -4.88 },
+        { id: 38, x: 38.87, z: -5.15 },
+      ];
+
+      calibratedEastCars.forEach((c) => {
         cars.push({
-          id: idCount++,
-          type: lane.dir,
-          modelIdx: idCount % 3,
-          axis: lane.axis,
-          perpAxis: lane.perpAxis,
-          sign: lane.sign,
-          homePerp: lane.perpHome,
-          pullOverPerp: lane.pullOverPerp,
-          targetPerp: lane.perpHome,
-          wrapPos: lane.wrapPos,
-          startPos: lane.startPos,
-          stopLine: lane.stopLine,
-          pos: new THREE.Vector3(
-            lane.axis === 'x' ? posParallel : lane.perpHome,
-            0.2,   // Raise slightly above road surface to avoid sinking
-            lane.axis === 'z' ? posParallel : lane.perpHome
-          ),
+          id: c.id,
+          type: 'W',
+          modelIdx: c.id % 3,
+          axis: 'x',
+          perpAxis: 'z',
+          sign: -1,
+          homePerp: c.z,
+          pullOverPerp: c.z,
+          targetPerp: c.z,
+          wrapPos: -SPAWN_DISTANCE - 20,
+          startPos: 43.0,
+          stopLine: 8,
+          pos: new THREE.Vector3(c.x, 0.2, c.z),
           rotY: 0,
           receivesBLE: false,
           speed: 0,
           state: 'IDLE_QUEUE',
         });
+      });
+
+    } else {
+      // ══════════════════════════════════════════════════════════════════════
+      // CASE 01: STANDARD QUEUE CONFIGURATION
+      // ══════════════════════════════════════════════════════════════════════
+      const lanes = [
+        { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 2.5, pullOverPerp: 3.1, stopLine: 11, wrapPos: -SPAWN_DISTANCE - 20, startPos: SPAWN_DISTANCE },
+        { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 1.0, pullOverPerp: 2.5, stopLine: 11, wrapPos: -SPAWN_DISTANCE - 20, startPos: SPAWN_DISTANCE },
+        { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -3.1, pullOverPerp: -3.4, stopLine: -11, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
+        { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -1.8, pullOverPerp: -3.2, stopLine: -11, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
+        { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -7.5, pullOverPerp: -9.0, stopLine: -7, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
+        { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -4.5, pullOverPerp: -2.0, stopLine: -7, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
+        { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 4.5, pullOverPerp: 1.5, stopLine: 6, wrapPos: -SPAWN_DISTANCE - 10, startPos: SPAWN_DISTANCE },
+        { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 7.5, pullOverPerp: 9.0, stopLine: 6, wrapPos: -SPAWN_DISTANCE - 10, startPos: SPAWN_DISTANCE },
+      ];
+
+      for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
+        const lane = lanes[laneIdx];
+        const carCount = (lane.dir === 'E') ? 9 : (lane.dir === 'N' || lane.dir === 'S') ? 3 : 4;
+        const laneStagger = (laneIdx % 2) * 5;
+        const spacing = (lane.dir === 'E') ? 7 : 8;
+
+        for (let i = 0; i < carCount; i++) {
+          const posParallel = lane.stopLine - (lane.sign * (2 + laneStagger + i * spacing));
+          cars.push({
+            id: idCount++,
+            type: lane.dir,
+            modelIdx: idCount % 3,
+            axis: lane.axis,
+            perpAxis: lane.perpAxis,
+            sign: lane.sign,
+            homePerp: lane.perpHome,
+            pullOverPerp: lane.pullOverPerp,
+            targetPerp: lane.perpHome,
+            wrapPos: lane.wrapPos,
+            startPos: lane.startPos,
+            stopLine: lane.stopLine,
+            pos: new THREE.Vector3(
+              lane.axis === 'x' ? posParallel : lane.perpHome,
+              0.2,
+              lane.axis === 'z' ? posParallel : lane.perpHome
+            ),
+            rotY: 0,
+            receivesBLE: false,
+            speed: 0,
+            state: 'IDLE_QUEUE',
+          });
+        }
       }
     }
+
     vehiclesRef.current = cars;
   }
 
-  const meshRefs = useRef(vehiclesRef.current.map(() => React.createRef()));
-  const beaconRefs = useRef(vehiclesRef.current.map(() => React.createRef()));
+  const meshRefs = useRef([]);
+  if (meshRefs.current.length !== (vehiclesRef.current?.length || 0)) {
+    meshRefs.current = vehiclesRef.current ? vehiclesRef.current.map(() => React.createRef()) : [];
+  }
+  const beaconRefs = useRef([]);
+  if (beaconRefs.current.length !== (vehiclesRef.current?.length || 0)) {
+    beaconRefs.current = vehiclesRef.current ? vehiclesRef.current.map(() => React.createRef()) : [];
+  }
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (editMode || boundaryMode || isFrozen) return;
 
     const ambPos = new THREE.Vector3(ambulancePosition.x, 0, ambulancePosition.z);
@@ -170,14 +325,27 @@ export function TrafficManager({ ambulancePosition, isPreempted, nGreen=false, s
       if (!inJunction) {
         // Determine if this specific car should pull over for the ambulance
         let shouldYield = false;
-        if (isPreempted && veh.type === 'E') {
-          const distToAmb = veh.pos.distanceTo(ambPos);
-          
-          // Cars at the back (x < -20) yield to form the corridor, but ONLY 
-          // when the ambulance's BLE dome reaches them (distToAmb <= 14).
-          // Stop yielding once the ambulance has passed them by a safe distance (30 units).
-          if (distToAmb <= 14 && veh.pos.x < -20 && ambPos.x <= veh.pos.x + 30) {
-             shouldYield = true;
+        if (selectedCase === 3) {
+          // Case 3: Ambulance A on South approach (heading North -Z at X = 2.2)
+          if (isPreempted && veh.type === 'N') {
+            const distToAmb = veh.pos.distanceTo(ambPos);
+            // 1. Front queue flushing (Z < 25.0): does NOT yield; accelerates through S_GREEN_CORRIDOR.
+            // 2. Trailing queue (Z >= 25.0): yields when within BLE dome (distToAmb <= 28)
+            //    and Ambulance A hasn't passed 30 units ahead (ambPos.z > veh.pos.z - 30).
+            if (veh.pos.z >= 25.0 && distToAmb <= 28 && ambPos.z > veh.pos.z - 30) {
+              shouldYield = true;
+            }
+          }
+        } else {
+          // Case 1: Ambulance on West approach (heading East +X at Z = -6.0)
+          if (isPreempted && veh.type === 'E') {
+            const distToAmb = veh.pos.distanceTo(ambPos);
+            // Cars at the back (x < -20) yield to form the corridor, but ONLY 
+            // when the ambulance's BLE dome reaches them (distToAmb <= 14).
+            // Stop yielding once the ambulance has passed them by a safe distance (30 units).
+            if (distToAmb <= 14 && veh.pos.x < -20 && ambPos.x <= veh.pos.x + 30) {
+              shouldYield = true;
+            }
           }
         }
 
@@ -346,14 +514,34 @@ export function TrafficManager({ ambulancePosition, isPreempted, nGreen=false, s
       // 7. LATERAL MOVEMENT + BOUNDARY PROTECTION
       // ══════════════════════════════════════════════════════════════════
       let safeTargetPerp = veh.targetPerp;
-      if (veh.axis === 'x') {
-        if (veh.type === 'E') {
-          safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, boundaries.top + 0.5, boundaries.bottom - 0.5);
+      if (selectedCase === 3) {
+        if (veh.axis === 'x') {
+          if (veh.type === 'E') {
+            // Eastbound on West approach: Right-side carriageway (+Z: 1.2 to 5.8)
+            safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, 1.2, 5.8);
+          } else {
+            // Westbound on East approach: Strictly clamped within -5.80 <= Z <= -1.80
+            safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, -5.80, -1.80);
+          }
         } else {
-          safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, boundaries.westBottom + 0.5, boundaries.westTop - 0.5);
+          if (veh.type === 'N') {
+            // South approach heading North: strictly within 0.8 <= X <= 5.4
+            safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, 0.8, 5.4);
+          } else {
+            // North approach heading South: strictly within -5.4 <= X <= -0.8
+            safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, -5.4, -0.8);
+          }
         }
       } else {
-        safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, boundaries.left + 0.5, boundaries.right - 0.5);
+        if (veh.axis === 'x') {
+          if (veh.type === 'E') {
+            safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, boundaries.top + 0.5, boundaries.bottom - 0.5);
+          } else {
+            safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, boundaries.westBottom + 0.5, boundaries.westTop - 0.5);
+          }
+        } else {
+          safeTargetPerp = THREE.MathUtils.clamp(safeTargetPerp, boundaries.left + 0.5, boundaries.right - 0.5);
+        }
       }
 
       const targetDelta = safeTargetPerp - veh.pos[veh.perpAxis];
@@ -369,23 +557,57 @@ export function TrafficManager({ ambulancePosition, isPreempted, nGreen=false, s
       veh.pos[veh.perpAxis] = THREE.MathUtils.lerp(veh.pos[veh.perpAxis], safeTargetPerp, delta * 1.2);
 
       // Absolute footpath clamp (last resort boundary enforcement)
-      if (veh.axis === 'x') {
-        if (veh.type === 'E') {
-          veh.pos.z = THREE.MathUtils.clamp(veh.pos.z, boundaries.top + 0.5, boundaries.bottom - 0.5);
+      if (selectedCase === 3) {
+        if (veh.axis === 'x') {
+          if (veh.type === 'E') {
+            veh.pos.z = THREE.MathUtils.clamp(veh.pos.z, 1.2, 5.8);
+          } else {
+            // Westbound on East approach: Strictly clamped within -5.80 <= Z <= -1.80
+            veh.pos.z = THREE.MathUtils.clamp(veh.pos.z, -5.80, -1.80);
+          }
         } else {
-          veh.pos.z = THREE.MathUtils.clamp(veh.pos.z, boundaries.westBottom + 0.5, boundaries.westTop - 0.5);
+          if (veh.type === 'N') {
+            // South approach heading North: strictly within 0.8 <= X <= 5.4
+            veh.pos.x = THREE.MathUtils.clamp(veh.pos.x, 0.8, 5.4);
+          } else {
+            // North approach heading South: strictly within -5.4 <= X <= -0.8
+            veh.pos.x = THREE.MathUtils.clamp(veh.pos.x, -5.4, -0.8);
+          }
         }
       } else {
-        veh.pos.x = THREE.MathUtils.clamp(veh.pos.x, boundaries.left + 0.5, boundaries.right - 0.5);
+        if (veh.axis === 'x') {
+          if (veh.type === 'E') {
+            veh.pos.z = THREE.MathUtils.clamp(veh.pos.z, boundaries.top + 0.5, boundaries.bottom - 0.5);
+          } else {
+            veh.pos.z = THREE.MathUtils.clamp(veh.pos.z, boundaries.westBottom + 0.5, boundaries.westTop - 0.5);
+          }
+        } else {
+          veh.pos.x = THREE.MathUtils.clamp(veh.pos.x, boundaries.left + 0.5, boundaries.right - 0.5);
+        }
       }
     });
 
 
 
+    // Active camera Frustum & Distance Culling (render only what the user sees)
+    projScreenMatrixRef.current.multiplyMatrices(
+      state.camera.projectionMatrix,
+      state.camera.matrixWorldInverse
+    );
+    frustumRef.current.setFromProjectionMatrix(projScreenMatrixRef.current);
+    const camPos = state.camera.position;
+
     vehiclesRef.current.forEach((veh, idx) => {
       const meshGroup = meshRefs.current[idx]?.current;
       const beaconMat = beaconRefs.current[idx]?.current;
       if (!meshGroup) return;
+
+      // 1. Frustum & Distance Culling: within 110 units AND inside camera frustum
+      const distToCam = camPos.distanceTo(veh.pos);
+      const isVisible = distToCam <= 110 && frustumRef.current.containsPoint(veh.pos);
+
+      meshGroup.visible = isVisible;
+      if (!isVisible) return; // Skip WebGL draw call completely
 
       const modelConfig = models[veh.modelIdx % models.length];
       meshGroup.position.copy(veh.pos);
