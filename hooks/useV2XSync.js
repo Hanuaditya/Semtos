@@ -1,41 +1,54 @@
 // hooks/useV2XSync.js
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
-// ── 1. Real Google Maps Road Network Nodes in Bengaluru (M.G. Road Corridor) ──
-// Central Junction (0, 0) = M.G. Road & Brigade Road Intersection
-export const ORIGIN_LNG = 77.606620;
-export const ORIGIN_LAT = 12.975220;
+const CHANNEL_NAME = 'SEMTOS_V2X_LIVE_BUS_V1';
+const ALT_CHANNEL_NAME = 'semtos_v2x_channel';
+const STORAGE_KEY = 'SEMTOS_V2X_LATEST_SNAPSHOT_V1';
+const CMD_STORAGE_KEY = 'SEMTOS_V2X_LATEST_CMD_V1';
+
+// ── Sub-Meter Calibrated Google Maps Road Nodes (Bengaluru M.G. Road Corridor) ──
+// Anchored at the true 4-way intersection of Mahatma Gandhi Rd, Brigade Rd (South), and Kamaraj Rd (North)
+export const ORIGIN_LNG = 77.608039;
+export const ORIGIN_LAT = 12.975113;
 
 export const GOOGLE_ROAD_NODES = {
-  // Main Avenue (M.G. Road: West <-> East)
-  W_EXIT:   [77.59945, 12.97722], // X = -135 (Queen's Statue / Cubbon Park West)
-  WP4:      [77.60180, 12.97657], // X = -87  (Anil Kumble Circle / Central St Rejoin)
-  J0:       [77.60662, 12.97522], // X = 0    (M.G. Road & Brigade Road Central Signal)
-  WP1:      [77.60925, 12.97448], // X = +47  (M.G. Road & Kamaraj Road Turnoff)
-  E_START:  [77.61190, 12.97388], // X = +90  (Mayo Hall East Approach)
-  E_FAR:    [77.61365, 12.97358], // X = +120 (1 MG Lido Mall)
+  // Main Avenue (Mahatma Gandhi Road: West <-> East)
+  W_EXIT:   [77.603800, 12.976260], // X = -135 (M.G. Road West near Anil Kumble Circle)
+  WP4:      [77.605037, 12.975921], // X = -87  (M.G. Road West Rejoin)
+  W_QUEUE:  [77.606500, 12.975510], // X = -70  (M.G. Road Opposite Barton Centre)
+  W_MID:    [77.607288, 12.975310], // X = -35  (M.G. Road Metro Station)
+  J0:       [77.608039, 12.975113], // X = 0    (M.G. Road & Brigade Rd / Kamaraj Rd 4-Way Signal)
+  WP1:      [77.609120, 12.974825], // X = +47  (M.G. Road East Detour Turnoff)
+  E_START:  [77.610150, 12.974550], // X = +90  (M.G. Road East Approach)
+  E_FAR:    [77.610900, 12.974350], // X = +120 (Trinity / Mayo Hall Approach)
 
-  // Cross Corridor (Brigade Road South -> J0 -> North Connector)
-  S_START:  [77.60582, 12.97125], // Z = +90  (Brigade Road South)
-  S_MID:    [77.60622, 12.97320], // Z = +45  (Brigade Road Mid)
-  N_MID:    [77.60710, 12.97685], // Z = -60  (North Cross Connector)
-  N_END:    [77.60755, 12.97825], // Z = -120 (North Exit)
+  // Cross Corridor (Brigade Road South <-> J0 <-> Kamaraj Road North)
+  S_START:  [77.607310, 12.973320], // Z = +90  (Brigade Road South)
+  S_MID:    [77.607675, 12.974220], // Z = +45  (Brigade Road Mid)
+  S_NEAR:   [77.607860, 12.974680], // Z = +22  (Brigade Road Stop Line Approach)
+  N_NEAR:   [77.608178, 12.975594], // Z = -20  (Kamaraj Road South-Mid)
+  N_MID:    [77.608294, 12.976034], // Z = -40  (Kamaraj Road Mid)
+  N_UPPER:  [77.608462, 12.976481], // Z = -60  (Kamaraj Road Upper)
+  N_FAR:    [77.608680, 12.976789], // Z = -90  (Kamaraj Road North)
+  N_END:    [77.608850, 12.977280], // Z = -120 (Kamaraj Road & Cubbon Road Junction)
 
-  // Case 03 5-Leg North Block Detour (Kamaraj Rd -> Cubbon Rd -> Central St)
-  WP1_MID:  [77.60902, 12.97625], // Kamaraj Road Midpoint
-  WP2:      [77.60878, 12.97798], // X = +47, Z = -60 (Kamaraj Rd & Cubbon Rd Corner)
-  LEG3_M1:  [77.60650, 12.97832], // Cubbon Road East-Mid
-  LEG3_M2:  [77.60440, 12.97864], // Cubbon Road West-Mid (Chinnaswamy North)
-  WP3:      [77.60242, 12.97892], // X = -87, Z = -60 (Cubbon Rd & Central St / Minsk Sq)
-  WP3_MID:  [77.60210, 12.97775], // Central Street Midpoint
+  // Case 03 5-Leg North Block Detour (East Bypass -> Cubbon Rd -> Anil Kumble / St. Mark's Connector)
+  WP1_MID:  [77.608980, 12.976050], // Leg 2 Midpoint (Northbound Connector to Cubbon Rd)
+  WP2:      [77.608850, 12.977280], // X = +47, Z = -60 (Cubbon Rd & Kamaraj Rd Corner)
+  LEG3_M1:  [77.607781, 12.977421], // Cubbon Road East-Mid
+  LEG3_M2:  [77.606864, 12.977788], // Cubbon Road Center (North of Parade Ground)
+  LEG3_M3:  [77.605603, 12.978285], // Cubbon Road West-Mid
+  WP3:      [77.604213, 12.978846], // X = -87, Z = -60 (Cubbon Rd West Turn)
+  WP3_MID:  [77.604625, 12.977380], // Leg 4 Midpoint (Southbound Return to M.G. Road)
 };
 
-// Polylines with corresponding 3D Twin axis stations
 const MAIN_AVE_STATIONS = [
   { x: -135, coord: GOOGLE_ROAD_NODES.W_EXIT },
   { x: -87,  coord: GOOGLE_ROAD_NODES.WP4 },
+  { x: -70,  coord: GOOGLE_ROAD_NODES.W_QUEUE },
+  { x: -35,  coord: GOOGLE_ROAD_NODES.W_MID },
   { x: 0,    coord: GOOGLE_ROAD_NODES.J0 },
   { x: 47,   coord: GOOGLE_ROAD_NODES.WP1 },
   { x: 90,   coord: GOOGLE_ROAD_NODES.E_START },
@@ -45,8 +58,12 @@ const MAIN_AVE_STATIONS = [
 const CROSS_AVE_STATIONS = [
   { z: 90,   coord: GOOGLE_ROAD_NODES.S_START },
   { z: 45,   coord: GOOGLE_ROAD_NODES.S_MID },
+  { z: 22,   coord: GOOGLE_ROAD_NODES.S_NEAR },
   { z: 0,    coord: GOOGLE_ROAD_NODES.J0 },
-  { z: -60,  coord: GOOGLE_ROAD_NODES.N_MID },
+  { z: -20,  coord: GOOGLE_ROAD_NODES.N_NEAR },
+  { z: -40,  coord: GOOGLE_ROAD_NODES.N_MID },
+  { z: -60,  coord: GOOGLE_ROAD_NODES.N_UPPER },
+  { z: -90,  coord: GOOGLE_ROAD_NODES.N_FAR },
   { z: -120, coord: GOOGLE_ROAD_NODES.N_END },
 ];
 
@@ -58,8 +75,9 @@ const DETOUR_LEG2_STATIONS = [
 
 const DETOUR_LEG3_STATIONS = [
   { x: 47.0,  coord: GOOGLE_ROAD_NODES.WP2 },
-  { x: 2.0,   coord: GOOGLE_ROAD_NODES.LEG3_M1 },
-  { x: -42.0, coord: GOOGLE_ROAD_NODES.LEG3_M2 },
+  { x: 14.0,  coord: GOOGLE_ROAD_NODES.LEG3_M1 },
+  { x: -20.0, coord: GOOGLE_ROAD_NODES.LEG3_M2 },
+  { x: -53.0, coord: GOOGLE_ROAD_NODES.LEG3_M3 },
   { x: -87.0, coord: GOOGLE_ROAD_NODES.WP3 },
 ];
 
@@ -69,7 +87,7 @@ const DETOUR_LEG4_STATIONS = [
   { z: -2.89, coord: GOOGLE_ROAD_NODES.WP4 },
 ];
 
-function computeBearing([lon1, lat1], [lon2, lat2]) {
+export function computeBearing([lon1, lat1], [lon2, lat2]) {
   const toRad = Math.PI / 180;
   const y = Math.sin((lon2 - lon1) * toRad) * Math.cos(lat2 * toRad);
   const x =
@@ -79,15 +97,19 @@ function computeBearing([lon1, lat1], [lon2, lat2]) {
 }
 
 /**
- * Shifts [lng, lat] laterally by `lateralMeters` perpendicular to `roadBearingDeg`.
- * Positive `lateralMeters` shifts to the right of `roadBearingDeg`; negative shifts left.
+ * Displaces [lng, lat] by (forwardMeters along bearingDeg, rightMeters perpendicular to bearingDeg)
  */
+export function displaceLngLat([lng, lat], bearingDeg, forwardMeters = 0, rightMeters = 0) {
+  const rad = (bearingDeg * Math.PI) / 180;
+  const perpRad = ((bearingDeg + 90) * Math.PI) / 180;
+  const northM = forwardMeters * Math.cos(rad) + rightMeters * Math.cos(perpRad);
+  const eastM = forwardMeters * Math.sin(rad) + rightMeters * Math.sin(perpRad);
+  return [lng + eastM / 108460.0, lat + northM / 110630.0];
+}
+
 export function offsetLngLatPerpendicular([lng, lat], roadBearingDeg, lateralMeters) {
   if (!lateralMeters || Math.abs(lateralMeters) < 0.05) return [lng, lat];
-  const perpBearingRad = ((roadBearingDeg + 90) % 360) * (Math.PI / 180);
-  const dLat = (lateralMeters * Math.cos(perpBearingRad)) / 110630.0;
-  const dLng = (lateralMeters * Math.sin(perpBearingRad)) / 108460.0;
-  return [lng + dLng, lat + dLat];
+  return displaceLngLat([lng, lat], roadBearingDeg, 0, lateralMeters);
 }
 
 function interpolateStations(stations, keyName, val) {
@@ -115,9 +137,8 @@ function interpolateStations(stations, keyName, val) {
 
 /**
  * Master Piecewise Road-Snapped Projector:
- * Takes any 3D Twin coordinate (x, z) + vehicle/ambulance context and returns:
- *   { lngLat: [lng, lat], bearing: degrees }
- * Guaranteed to lie 100% on the real Google Maps road network!
+ * Maps any 3D Twin (x, z) + vehicle/ambulance context onto the exact Google Maps road asphalt
+ * and returns { lngLat: [lng, lat], bearing: degrees (0 = North, 90 = East) }.
  */
 export function twinToRoadGeo(x = 0, z = 0, options = {}) {
   const {
@@ -133,35 +154,30 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
   // ── CASE A: Ambulance B on the 5-Leg North Block Detour ──
   if (isAmbulance && ambId === 'AMB_B') {
     if (wpIdx === 1 || (Math.abs(x - 47) < 4.5 && z < -4.5 && z > -58.5)) {
-      // Leg 2: Kamaraj Road Northbound (WP1 -> WP2)
       const res = interpolateStations(DETOUR_LEG2_STATIONS, 'z', z);
       return { lngLat: res.coord, bearing: res.bearing };
     }
     if (wpIdx === 2 || z <= -55.0) {
-      // Leg 3: Cubbon Road Westbound (WP2 -> WP3)
       const res = interpolateStations(DETOUR_LEG3_STATIONS, 'x', x);
       return { lngLat: res.coord, bearing: res.bearing };
     }
     if (wpIdx === 3 || (Math.abs(x - (-87)) < 4.5 && z < -4.5)) {
-      // Leg 4: Central Street Southbound (WP3 -> WP4)
       const res = interpolateStations(DETOUR_LEG4_STATIONS, 'z', z);
       return { lngLat: res.coord, bearing: res.bearing };
     }
-    // Leg 1 (East approach x: 90 -> 47) or Leg 5 (West exit x: -87 -> -135) on M.G. Road
     const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
-    // Westbound along M.G. Road is opposite to increasing X station order
     const westboundBearing = (res.bearing + 180) % 360;
-    const lateralMeters = (z / 9.5) * 4.2;
+    const lateralMeters = (z / 9.5) * 3.8;
     return {
       lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
       bearing: westboundBearing,
     };
   }
 
-  // ── CASE B: Ambulance A on Brigade Road South->North Priority Corridor ──
+  // ── CASE B: Ambulance A on Brigade Road -> Kamaraj Road Priority Corridor ──
   if (isAmbulance && ambId === 'AMB_A') {
     const res = interpolateStations(CROSS_AVE_STATIONS, 'z', z);
-    const lateralMeters = (x / 5.5) * 3.0;
+    const lateralMeters = (x / 5.5) * 2.6;
     return {
       lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
       bearing: res.bearing,
@@ -171,7 +187,7 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
   // ── CASE C: Case 01 Single Ambulance on M.G. Road West->East Corridor ──
   if (isAmbulance) {
     const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
-    const lateralMeters = (z / 9.5) * 4.2;
+    const lateralMeters = (z / 9.5) * 3.8;
     return {
       lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
       bearing: res.bearing,
@@ -181,8 +197,7 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
   // ── CASE D: Civilian Cars on M.G. Road ('E' Eastbound or 'W' Westbound) ──
   if (carType === 'E' || carType === 'W') {
     const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
-    // Scale 3D Twin lateral Z (-9.5..+9.5) to real M.G. Road half-width (-4.5m..+4.5m)
-    const lateralMeters = (z / 9.5) * 4.5;
+    const lateralMeters = (z / 9.5) * 4.0;
     const coords = offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters);
     const baseBearing = carType === 'E' ? res.bearing : (res.bearing + 180) % 360;
     return {
@@ -191,13 +206,11 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
     };
   }
 
-  // ── CASE E: Civilian Cars on Brigade Road ('N' Northbound or 'S' Southbound) ──
+  // ── CASE E: Civilian Cars on Brigade Rd / Kamaraj Rd ('N' Northbound or 'S' Southbound) ──
   if (carType === 'N' || carType === 'S') {
     const res = interpolateStations(CROSS_AVE_STATIONS, 'z', z);
-    // Scale 3D Twin lateral X (-5.4..+5.4) to real Brigade Road half-width (-3.5m..+3.5m)
-    const lateralMeters = (x / 5.4) * 3.5;
+    const lateralMeters = (x / 5.4) * 3.0;
     const coords = offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters);
-    // CROSS_AVE_STATIONS is ordered z: +90 (South) -> -120 (North), so res.bearing is Northbound
     const baseBearing = carType === 'N' ? res.bearing : (res.bearing + 180) % 360;
     return {
       lngLat: coords,
@@ -212,23 +225,20 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
   }
   if (Math.abs(x) <= 14 && Math.abs(z) > 12) {
     const res = interpolateStations(CROSS_AVE_STATIONS, 'z', z);
-    const lateralMeters = (x / 5.4) * 3.5;
+    const lateralMeters = (x / 5.4) * 3.0;
     return {
       lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
       bearing: res.bearing,
     };
   }
   const res = interpolateStations(MAIN_AVE_STATIONS, 'x', x);
-  const lateralMeters = (z / 9.5) * 4.5;
+  const lateralMeters = (z / 9.5) * 4.0;
   return {
     lngLat: offsetLngLatPerpendicular(res.coord, res.bearing, lateralMeters),
     bearing: res.bearing,
   };
 }
 
-/**
- * Legacy helper wrapper so any call to twinToLngLat(x, z) automatically uses road-snapped coordinates
- */
 export function twinToLngLat(x = 0, z = 0, options = {}) {
   return twinToRoadGeo(x, z, options).lngLat;
 }
@@ -244,11 +254,191 @@ export function twinHeadingToBearing(typeOrDir, rotY = 0, isAmbulance = false, a
 }
 
 /**
+ * Creates a 3D rectangular footprint polygon in [lng, lat] aligned with `bearingDeg`
+ */
+function createOrientedRectCoords(centerLngLat, bearingDeg, halfLenM, halfWidM, forwardShiftM = 0) {
+  const c = forwardShiftM ? displaceLngLat(centerLngLat, bearingDeg, forwardShiftM, 0) : centerLngLat;
+  const fl = displaceLngLat(c, bearingDeg, +halfLenM, -halfWidM);
+  const fr = displaceLngLat(c, bearingDeg, +halfLenM, +halfWidM);
+  const br = displaceLngLat(c, bearingDeg, -halfLenM, +halfWidM);
+  const bl = displaceLngLat(c, bearingDeg, -halfLenM, -halfWidM);
+  return [[fl, fr, br, bl, fl]];
+}
+
+/**
+ * Generates True 3D Extruded Vehicle Polygons (chassis + cabin + emergency lightbar)
+ * so every car and ambulance sits directly on the Google Maps road surface in 3D WebGL space
+ * and is 100% locked parallel to the road at every camera rotation/pitch/globe angle!
+ */
+export function build3DVehiclesGeoJSON(vehicles = [], activeAmbUnits = [], selectedCase = 1) {
+  const features = [];
+
+  vehicles.forEach((veh) => {
+    const snapped = twinToRoadGeo(veh.x, veh.z, {
+      carType: veh.type,
+      rotY: veh.rotY,
+      isAmbulance: false,
+    });
+
+    const isYielding = veh.state === 'YIELDING' || veh.state === 'HOLDING';
+    const isMoving = veh.speed > 0.4;
+    const isEastBlockade = selectedCase === 3 && veh.type === 'W' && veh.x >= 10 && veh.x <= 44;
+
+    const bodyColor = isYielding
+      ? '#f59e0b'
+      : isEastBlockade
+      ? '#ef4444'
+      : veh.receivesBLE
+      ? '#10b981'
+      : isMoving
+      ? '#38bdf8'
+      : '#f8fafc';
+
+    const cabinColor = isYielding
+      ? '#78350f'
+      : isEastBlockade
+      ? '#7f1d1d'
+      : '#0f172a';
+
+    // 1. Lower Car Chassis (4.5m long x 1.95m wide x 1.1m tall)
+    features.push({
+      type: 'Feature',
+      properties: {
+        color: bodyColor,
+        base: 0,
+        height: 1.15,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: createOrientedRectCoords(snapped.lngLat, snapped.bearing, 2.25, 0.98, 0),
+      },
+    });
+
+    // 2. Upper Car Cabin / Greenhouse (2.3m long x 1.65m wide, 1.15m -> 1.75m)
+    features.push({
+      type: 'Feature',
+      properties: {
+        color: cabinColor,
+        base: 1.15,
+        height: 1.75,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: createOrientedRectCoords(snapped.lngLat, snapped.bearing, 1.15, 0.82, -0.2),
+      },
+    });
+
+    // 3. Front Hood / Headlight Bar Indicator (shows exact forward direction in 3D)
+    features.push({
+      type: 'Feature',
+      properties: {
+        color: '#fef08a',
+        base: 0.4,
+        height: 1.25,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: createOrientedRectCoords(snapped.lngLat, snapped.bearing, 0.3, 0.85, +2.05),
+      },
+    });
+  });
+
+  // Render 3D Extruded Ambulance Units
+  activeAmbUnits.forEach((u) => {
+    // Ambulance Body (6.4m long x 2.35m wide x 2.6m tall)
+    features.push({
+      type: 'Feature',
+      properties: {
+        color: '#ffffff',
+        base: 0,
+        height: 2.6,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: createOrientedRectCoords(u.lngLat, u.bearing, 3.2, 1.18, 0),
+      },
+    });
+
+    // Ambulance Emergency Roof Stripe & Lightbar
+    features.push({
+      type: 'Feature',
+      properties: {
+        color: u.color || '#ef4444',
+        base: 2.6,
+        height: 3.25,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: createOrientedRectCoords(u.lngLat, u.bearing, 1.8, 0.95, 0.4),
+      },
+    });
+  });
+
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
+}
+
+/**
+ * Generates High-Density 3D Extruded Buildings along M.G. Road, Brigade Road, Church Street,
+ * Kamaraj Road, and Cubbon Road so zooming in ALWAYS renders realistic 3D urban massing
+ * alongside the global OpenFreeMap 3D building layer!
+ */
+export function buildBengaluru3DBuildingsGeoJSON() {
+  const bldgs = [
+    // South of M.G. Road (between Church St and M.G. Road, West of Brigade Rd)
+    { lng: 77.60445, lat: 12.97562, brg: 105, l: 28, w: 14, h: 32, col: '#1e293b' },
+    { lng: 77.60525, lat: 12.97542, brg: 105, l: 34, w: 15, h: 46, col: '#334155' }, // Barton Centre / 13th Floor
+    { lng: 77.60612, lat: 12.97518, brg: 105, l: 32, w: 14, h: 28, col: '#1e293b' },
+    { lng: 77.60695, lat: 12.97496, brg: 105, l: 30, w: 14, h: 36, col: '#334155' },
+    { lng: 77.60755, lat: 12.97480, brg: 105, l: 22, w: 13, h: 30, col: '#1e293b' }, // SkyDeck / Brigade Corner West
+
+    // South-East of Brigade Rd & M.G. Road (Cauvery Emporium / Mayo Hall Block)
+    { lng: 77.60855, lat: 12.97452, brg: 105, l: 30, w: 15, h: 38, col: '#334155' },
+    { lng: 77.60935, lat: 12.97430, brg: 105, l: 35, w: 16, h: 54, col: '#1e293b' }, // Utility Building Tower
+    { lng: 77.61025, lat: 12.97405, brg: 105, l: 32, w: 15, h: 34, col: '#334155' },
+
+    // North-East of Kamaraj Rd & M.G. Road (Commercial Street / Dickenson Rd Block)
+    { lng: 77.60865, lat: 12.97538, brg: 16,  l: 22, w: 14, h: 26, col: '#1e293b' },
+    { lng: 77.60882, lat: 12.97595, brg: 16,  l: 24, w: 14, h: 32, col: '#334155' },
+    { lng: 77.60902, lat: 12.97652, brg: 16,  l: 24, w: 15, h: 29, col: '#1e293b' },
+    { lng: 77.60955, lat: 12.97515, brg: 105, l: 28, w: 15, h: 40, col: '#334155' },
+    { lng: 77.61035, lat: 12.97492, brg: 105, l: 28, w: 15, h: 35, col: '#1e293b' },
+
+    // Along Brigade Road (West & East sides of Brigade Rd South Arm)
+    { lng: 77.60742, lat: 12.97445, brg: 21,  l: 24, w: 12, h: 28, col: '#334155' },
+    { lng: 77.60722, lat: 12.97390, brg: 21,  l: 26, w: 12, h: 34, col: '#1e293b' },
+    { lng: 77.60812, lat: 12.97425, brg: 21,  l: 24, w: 12, h: 30, col: '#1e293b' },
+    { lng: 77.60792, lat: 12.97368, brg: 21,  l: 26, w: 13, h: 36, col: '#334155' },
+
+    // Along Cubbon Road North Side
+    { lng: 77.60825, lat: 12.97768, brg: 108, l: 28, w: 14, h: 30, col: '#1e293b' },
+    { lng: 77.60725, lat: 12.97808, brg: 108, l: 30, w: 14, h: 36, col: '#334155' },
+    { lng: 77.60615, lat: 12.97852, brg: 108, l: 28, w: 14, h: 32, col: '#1e293b' },
+    { lng: 77.60505, lat: 12.97895, brg: 108, l: 28, w: 14, h: 42, col: '#334155' },
+  ];
+
+  return {
+    type: 'FeatureCollection',
+    features: bldgs.map((b, i) => ({
+      type: 'Feature',
+      id: i + 1,
+      properties: {
+        height: b.h,
+        base: 0,
+        color: b.col,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: createOrientedRectCoords([b.lng, b.lat], b.brg, b.l, b.w, 0),
+      },
+    })),
+  };
+}
+
+/**
  * Builds GeoJSON features for the exact Google Maps Road Corridors:
- *   - M.G. Road Main Corridor
- *   - Brigade Road South-North Priority Corridor (Case 03 Ambulance A)
- *   - Kamaraj Rd -> Cubbon Rd -> Central St 5-Leg Macro-Detour (Case 03 Ambulance B)
- *   - East Approach Gridlock Blockade Zone (between Kamaraj Rd WP1 and Brigade Rd J0)
  */
 export function buildTwinRoadGeoJSON(selectedCase = 1, detourActive = false) {
   const N = GOOGLE_ROAD_NODES;
@@ -259,16 +449,16 @@ export function buildTwinRoadGeoJSON(selectedCase = 1, detourActive = false) {
       properties: { kind: 'main_road_line', name: 'M.G. Road Corridor' },
       geometry: {
         type: 'LineString',
-        coordinates: [N.W_EXIT, N.WP4, N.J0, N.WP1, N.E_START, N.E_FAR],
+        coordinates: [N.W_EXIT, N.WP4, N.W_QUEUE, N.W_MID, N.J0, N.WP1, N.E_START, N.E_FAR],
       },
     },
-    // Base Brigade Road Cross Corridor Casing
+    // Base Brigade Road -> Kamaraj Road Cross Corridor Casing
     {
       type: 'Feature',
-      properties: { kind: 'cross_road_line', name: 'Brigade Road Corridor' },
+      properties: { kind: 'cross_road_line', name: 'Brigade Rd & Kamaraj Rd Corridor' },
       geometry: {
         type: 'LineString',
-        coordinates: [N.S_START, N.S_MID, N.J0, N.N_MID, N.N_END],
+        coordinates: [N.S_START, N.S_MID, N.S_NEAR, N.J0, N.N_NEAR, N.N_MID, N.N_UPPER, N.N_FAR, N.N_END],
       },
     },
   ];
@@ -282,30 +472,30 @@ export function buildTwinRoadGeoJSON(selectedCase = 1, detourActive = false) {
       },
       geometry: {
         type: 'LineString',
-        coordinates: [N.W_EXIT, N.WP4, N.J0, N.WP1, N.E_START],
+        coordinates: [N.W_EXIT, N.WP4, N.W_QUEUE, N.W_MID, N.J0, N.WP1, N.E_START],
       },
     });
   } else if (selectedCase === 3) {
-    // Ambulance A South->North Brigade Road Green Corridor
+    // Ambulance A South->North Brigade Rd to Kamaraj Rd Priority Green Wave
     lines.push({
       type: 'Feature',
       properties: {
         kind: 'amb_a_corridor',
-        name: 'Ambulance A Brigade Road Priority Green Wave',
+        name: 'Ambulance A Brigade Rd -> Kamaraj Rd Priority Green Wave',
       },
       geometry: {
         type: 'LineString',
-        coordinates: [N.S_START, N.S_MID, N.J0, N.N_MID, N.N_END],
+        coordinates: [N.S_START, N.S_MID, N.S_NEAR, N.J0, N.N_NEAR, N.N_MID, N.N_UPPER, N.N_FAR, N.N_END],
       },
     });
 
-    // Ambulance B 5-Leg Macro-Detour along Kamaraj Rd -> Cubbon Rd -> Central St -> M.G. Rd
+    // Ambulance B 5-Leg Macro-Detour along East Bypass -> Cubbon Rd -> Anil Kumble / St. Mark's -> M.G. Rd
     lines.push({
       type: 'Feature',
       properties: {
         kind: 'amb_b_detour',
         active: detourActive ? 1 : 0,
-        name: 'Ambulance B 5-Leg North Block Detour (Kamaraj Rd -> Cubbon Rd -> Central St)',
+        name: 'Ambulance B 5-Leg North Block Detour (Cubbon Rd Bypass)',
       },
       geometry: {
         type: 'LineString',
@@ -316,6 +506,7 @@ export function buildTwinRoadGeoJSON(selectedCase = 1, detourActive = false) {
           N.WP2,
           N.LEG3_M1,
           N.LEG3_M2,
+          N.LEG3_M3,
           N.WP3,
           N.WP3_MID,
           N.WP4,
@@ -324,7 +515,7 @@ export function buildTwinRoadGeoJSON(selectedCase = 1, detourActive = false) {
       },
     });
 
-    // East Approach Dense Gridlock Blockade Zone (X: 10..43 between J0 and WP1)
+    // East Approach Dense Gridlock Blockade Zone (X: 12..43 between J0 and WP1)
     const bStart = twinToRoadGeo(12, -3.5, { carType: 'W' }).lngLat;
     const bEnd = twinToRoadGeo(43, -3.5, { carType: 'W' }).lngLat;
     lines.push({
@@ -346,10 +537,6 @@ export function buildTwinRoadGeoJSON(selectedCase = 1, detourActive = false) {
   };
 }
 
-/**
- * Generates a fallback deterministic snapshot matching TrafficManager.jsx
- * when /ambulance or /driver is opened before the 3D Twin tab is started.
- */
 export function createDefaultSnapshot(selectedCase = 1) {
   const cars = [];
   let idCount = 1;
@@ -516,7 +703,7 @@ export function createDefaultSnapshot(selectedCase = 1) {
     },
     vehicles: cars,
     auditLogs: [
-      { id: 1, timestamp: '[READY]', message: 'Google Maps Satellite Road-Snapped Engine Ready.' },
+      { id: 1, timestamp: '[READY]', message: 'Google Maps Satellite + 3D Buildings Road-Snapped Engine Ready.' },
     ],
   };
 }
@@ -524,99 +711,176 @@ export function createDefaultSnapshot(selectedCase = 1) {
 /**
  * Publisher Hook used inside src/app/page.js (3D Twin Command Center)
  */
-export function useV2XPublisher({
-  selectedCase,
-  vehiclesRef,
-  case1Stream,
-  case1Signal,
-  case3,
-  onRemoteCommand,
-}) {
+export function useV2XPublisher(props = {}) {
+  const {
+    selectedCase = 1,
+    vehiclesRef,
+    case1Stream,
+    case1Signal,
+    case3,
+    onRemoteCommand,
+  } = props;
+
   const channelRef = useRef(null);
-  const stateRef = useRef({});
+  const altChannelRef = useRef(null);
+  const cmdCallbackRef = useRef(onRemoteCommand);
 
   useEffect(() => {
+    cmdCallbackRef.current = onRemoteCommand;
+  }, [onRemoteCommand]);
+
+  const stateRef = useRef({});
+  useEffect(() => {
+    const isSimRunning = props.isSimulationRunning !== undefined
+      ? props.isSimulationRunning
+      : (selectedCase === 1 ? case1Stream?.isSimulationRunning : case3?.isSimulationRunning);
+
+    const isPreempted = props.isPreempted !== undefined
+      ? props.isPreempted
+      : (selectedCase === 1 ? case1Signal?.isPreempted : (case3?.deadlockDetected && !case3?.trafficCycleActive));
+
+    const isFrozen = props.isFrozen !== undefined
+      ? props.isFrozen
+      : (selectedCase === 1 ? case1Stream?.isFrozen : case3?.isFrozen);
+
+    const deadlockDetected = props.deadlockDetected !== undefined
+      ? props.deadlockDetected
+      : (selectedCase === 3 ? Boolean(case3?.deadlockDetected) : false);
+
+    const trafficCycleActive = props.trafficCycleActive !== undefined
+      ? props.trafficCycleActive
+      : (selectedCase === 3 ? Boolean(case3?.trafficCycleActive) : false);
+
+    const signalPhase = props.signalPhase !== undefined
+      ? props.signalPhase
+      : (selectedCase === 1 ? case1Signal?.signalPhase : case3?.signals?.phase);
+
+    const timeRemaining = props.timeRemaining !== undefined
+      ? props.timeRemaining
+      : (selectedCase === 1 ? case1Signal?.timeRemaining : case3?.signals?.timeRemaining);
+
+    const signals = props.signals !== undefined
+      ? props.signals
+      : {
+          nGreen: selectedCase === 1 ? case1Signal?.nGreen : case3?.signals?.nGreen,
+          sGreen: selectedCase === 1 ? case1Signal?.sGreen : case3?.signals?.sGreen,
+          eGreen: selectedCase === 1 ? case1Signal?.eGreen : case3?.signals?.eGreen,
+          wGreen: selectedCase === 1 ? case1Signal?.wGreen : case3?.signals?.wGreen,
+          nYellow: selectedCase === 1 ? case1Signal?.nYellow : case3?.signals?.nYellow,
+          sYellow: selectedCase === 1 ? case1Signal?.sYellow : case3?.signals?.sYellow,
+          eYellow: selectedCase === 1 ? case1Signal?.eYellow : case3?.signals?.eYellow,
+          wYellow: selectedCase === 1 ? case1Signal?.wYellow : case3?.signals?.wYellow,
+        };
+
+    const ambulancePosition = props.ambulancePosition !== undefined
+      ? props.ambulancePosition
+      : case1Stream?.ambulancePosition;
+
+    const ambulanceA = props.ambulanceA !== undefined
+      ? props.ambulanceA
+      : case3?.ambulanceA;
+
+    const ambulanceB = props.ambulanceB !== undefined
+      ? props.ambulanceB
+      : case3?.ambulanceB;
+
+    const auditLogs = props.auditLogs !== undefined
+      ? props.auditLogs
+      : (selectedCase === 1 ? case1Stream?.auditLogs : case3?.auditLogs);
+
     stateRef.current = {
       selectedCase,
-      vehiclesRef,
-      case1Stream,
-      case1Signal,
-      case3,
-      onRemoteCommand,
+      isSimulationRunning: isSimRunning,
+      isPreempted,
+      isFrozen,
+      deadlockDetected,
+      trafficCycleActive,
+      signalPhase,
+      timeRemaining,
+      signals,
+      ambulancePosition,
+      ambulanceA,
+      ambulanceB,
+      auditLogs,
     };
   });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    if ('BroadcastChannel' in window) {
-      const ch = new BroadcastChannel('semtos_v2x_channel');
-      ch.onmessage = (event) => {
-        const data = event.data;
-        if (data?.type === 'COMMAND' && stateRef.current.onRemoteCommand) {
-          stateRef.current.onRemoteCommand(data.command, data.payload || {});
-        }
-      };
-      channelRef.current = ch;
-    }
+    const bc = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL_NAME) : null;
+    const altBc = 'BroadcastChannel' in window ? new BroadcastChannel(ALT_CHANNEL_NAME) : null;
+    channelRef.current = bc;
+    altChannelRef.current = altBc;
+
+    const handleMessage = (event) => {
+      const data = event?.data;
+      if (data && (data.type === 'SEMTOS_REMOTE_CMD' || data.type === 'COMMAND') && cmdCallbackRef.current) {
+        cmdCallbackRef.current(data.command, data.payload || {});
+      }
+    };
+
+    if (bc) bc.addEventListener('message', handleMessage);
+    if (altBc) altBc.addEventListener('message', handleMessage);
+
+    const handleStorage = (e) => {
+      if (e.key === CMD_STORAGE_KEY && e.newValue && cmdCallbackRef.current) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          cmdCallbackRef.current(parsed.command, parsed.payload || {});
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
 
     let tickCount = 0;
-    const interval = setInterval(async () => {
-      const { selectedCase: sc, vehiclesRef: vRef, case1Stream: c1, case1Signal: s1, case3: c3 } = stateRef.current;
-      if (!c1 || !s1 || !c3) return;
+    const interval = setInterval(() => {
+      const s = stateRef.current;
+      const rawCars = vehiclesRef?.current || [];
 
-      const rawVehicles = vRef?.current || [];
-      const serializedVehicles = rawVehicles.map((v) => ({
-        id: v.id,
-        type: v.type,
-        x: Number((v.pos?.x ?? v.x ?? 0).toFixed(2)),
-        z: Number((v.pos?.z ?? v.z ?? 0).toFixed(2)),
-        homePerp: v.homePerp,
-        pullOverPerp: v.pullOverPerp,
-        rotY: Number((v.rotY || 0).toFixed(3)),
-        speed: Number((v.speed || 0).toFixed(2)),
-        state: v.state || 'IDLE_QUEUE',
-        receivesBLE: Boolean(v.receivesBLE),
+      const serializedCars = rawCars.map((c) => ({
+        id: c.id,
+        type: c.type,
+        x: Number((c.pos?.x ?? c.x ?? 0).toFixed(2)),
+        z: Number((c.pos?.z ?? c.z ?? 0).toFixed(2)),
+        rotY: Number((c.rotY ?? 0).toFixed(3)),
+        speed: Number((c.speed ?? 0).toFixed(2)),
+        state: c.state || 'IDLE_QUEUE',
+        receivesBLE: Boolean(c.receivesBLE),
       }));
 
       const snapshot = {
         timestamp: Date.now(),
         source: 'LIVE_3D_TWIN',
-        selectedCase: sc,
-        isSimulationRunning: sc === 1 ? c1.isSimulationRunning : c3.isSimulationRunning,
-        isPreempted: sc === 1 ? s1.isPreempted : (c3.deadlockDetected && !c3.trafficCycleActive),
-        isFrozen: sc === 1 ? c1.isFrozen : c3.isFrozen,
-        deadlockDetected: sc === 3 ? c3.deadlockDetected : false,
-        trafficCycleActive: sc === 3 ? c3.trafficCycleActive : false,
-        signalPhase: sc === 1 ? s1.signalPhase : c3.signals.phase,
-        phaseLabel: sc === 1 ? s1.phase : c3.signals.phaseLabel,
-        timeRemaining: sc === 1 ? s1.timeRemaining : c3.signals.timeRemaining,
-        signals: {
-          nGreen: sc === 1 ? s1.nGreen : c3.signals.nGreen,
-          sGreen: sc === 1 ? s1.sGreen : c3.signals.sGreen,
-          eGreen: sc === 1 ? s1.eGreen : c3.signals.eGreen,
-          wGreen: sc === 1 ? s1.wGreen : c3.signals.wGreen,
-          nYellow: sc === 1 ? s1.nYellow : c3.signals.nYellow,
-          sYellow: sc === 1 ? s1.sYellow : c3.signals.sYellow,
-          eYellow: sc === 1 ? s1.eYellow : c3.signals.eYellow,
-          wYellow: sc === 1 ? s1.wYellow : c3.signals.wYellow,
-        },
-        ambulancePosition: c1.ambulancePosition,
-        ambulanceA: c3.ambulanceA,
-        ambulanceB: c3.ambulanceB,
-        metrics: c3.metrics,
-        vehicles: serializedVehicles,
-        auditLogs: (sc === 1 ? c1.auditLogs : c3.auditLogs).slice(-15),
+        selectedCase: s.selectedCase,
+        isSimulationRunning: s.isSimulationRunning,
+        isPreempted: s.isPreempted,
+        isFrozen: s.isFrozen,
+        deadlockDetected: s.deadlockDetected,
+        trafficCycleActive: s.trafficCycleActive,
+        signalPhase: s.signalPhase,
+        timeRemaining: s.timeRemaining,
+        signals: s.signals,
+        ambulancePosition: s.ambulancePosition,
+        ambulanceA: s.ambulanceA,
+        ambulanceB: s.ambulanceB,
+        vehicles: serializedCars,
+        auditLogs: (s.auditLogs || []).slice(0, 18),
       };
 
-      if (channelRef.current) {
-        try {
-          channelRef.current.postMessage({ type: 'SNAPSHOT', payload: snapshot });
-        } catch (_) {}
+      if (bc) {
+        bc.postMessage({ type: 'SEMTOS_SNAPSHOT', snapshot });
       }
+      if (altBc) {
+        altBc.postMessage({ type: 'SNAPSHOT', payload: snapshot });
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      } catch (_) {}
 
+      // Periodic LAN sync with /api/v2x
       tickCount++;
-      if (tickCount % 3 === 0) {
+      if (tickCount % 4 === 0) {
         try {
           fetch('/api/v2x', {
             method: 'POST',
@@ -624,24 +888,33 @@ export function useV2XPublisher({
             body: JSON.stringify({ type: 'SNAPSHOT', payload: snapshot }),
           }).catch(() => {});
 
-          const res = await fetch('/api/v2x?consumeCommands=1', { cache: 'no-store' });
-          if (res.ok) {
-            const data = await res.json();
-            if (Array.isArray(data.commands) && data.commands.length > 0 && stateRef.current.onRemoteCommand) {
-              data.commands.forEach((cmdObj) => {
-                stateRef.current.onRemoteCommand(cmdObj.command, cmdObj.payload || {});
-              });
-            }
-          }
+          fetch('/api/v2x?consumeCommands=1', { cache: 'no-store' })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (data?.commands && Array.isArray(data.commands) && cmdCallbackRef.current) {
+                data.commands.forEach((c) => {
+                  cmdCallbackRef.current(c.command, c.payload || {});
+                });
+              }
+            })
+            .catch(() => {});
         } catch (_) {}
       }
-    }, 50);
+    }, 65);
 
     return () => {
       clearInterval(interval);
-      if (channelRef.current) channelRef.current.close();
+      if (bc) {
+        bc.removeEventListener('message', handleMessage);
+        bc.close();
+      }
+      if (altBc) {
+        altBc.removeEventListener('message', handleMessage);
+        altBc.close();
+      }
+      window.removeEventListener('storage', handleStorage);
     };
-  }, []);
+  }, [vehiclesRef]);
 }
 
 /**
@@ -650,190 +923,343 @@ export function useV2XPublisher({
 export function useV2XSubscriber() {
   const [snapshot, setSnapshot] = useState(() => createDefaultSnapshot(1));
   const [isLiveTwinConnected, setIsLiveTwinConnected] = useState(false);
-
-  const lastTwinMsgTimeRef = useRef(0);
+  const lastLiveTimestampRef = useRef(0);
   const channelRef = useRef(null);
+  const altChannelRef = useRef(null);
+
   const localSimRef = useRef(createDefaultSnapshot(1));
+  const localCase3ClockRef = useRef(0);
 
   const sendCommand = useCallback((command, payload = {}) => {
+    if (typeof window === 'undefined') return;
+
+    const msg = {
+      type: 'SEMTOS_REMOTE_CMD',
+      command,
+      payload,
+      timestamp: Date.now(),
+    };
+
     if (channelRef.current) {
       try {
-        channelRef.current.postMessage({ type: 'COMMAND', command, payload });
+        channelRef.current.postMessage(msg);
       } catch (_) {}
     }
+    if (altChannelRef.current) {
+      try {
+        altChannelRef.current.postMessage({ type: 'COMMAND', command, payload });
+      } catch (_) {}
+    }
+    try {
+      localStorage.setItem(CMD_STORAGE_KEY, JSON.stringify(msg));
+    } catch (_) {}
+
     fetch('/api/v2x', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'COMMAND', command, payload }),
     }).catch(() => {});
 
-    if (Date.now() - lastTwinMsgTimeRef.current > 1200) {
-      const s = localSimRef.current;
-      if (command === 'SWITCH_CASE') {
-        const nextCase = payload.caseId || (s.selectedCase === 1 ? 3 : 1);
-        localSimRef.current = createDefaultSnapshot(nextCase);
-        setSnapshot({ ...localSimRef.current });
-      } else if (command === 'DISPATCH') {
-        s.isSimulationRunning = true;
-        if (s.selectedCase === 1) {
-          s.ambulancePosition = { x: -120, y: 0.5, z: -6.0, rotation: -Math.PI / 2 };
-          s.signalPhase = 'W_GREEN';
-          s.isPreempted = true;
-          s.signals = { nGreen: false, sGreen: false, eGreen: true, wGreen: false, nYellow: false, sYellow: false, eYellow: false, wYellow: false };
-        } else {
-          s.deadlockDetected = true;
-          s.trafficCycleActive = false;
-          s.isPreempted = true;
-          s.signalPhase = 'S_GREEN_CORRIDOR';
-          s.signals = { nGreen: true, sGreen: true, eGreen: false, wGreen: false, nYellow: false, sYellow: false, eYellow: false, wYellow: false };
-          s.ambulanceA.position = { x: 2.2, y: 0.65, z: 90.0, rotation: 0 };
-          s.ambulanceA.status = 'CORRIDOR_ACTIVE';
-          s.ambulanceB.position = { x: 90.0, y: 0.65, z: -2.89, rotation: Math.PI / 2 };
-          s.ambulanceB.currentWaypointIdx = 0;
-          s.ambulanceB.detourActive = true;
-          s.ambulanceB.status = 'DETOUR_ACTIVE';
-          s.ambulanceB.waypointName = 'Leg 1: East Approach -> WP 1';
-        }
-        setSnapshot({ ...s });
-      } else if (command === 'FREEZE') {
-        s.isFrozen = !s.isFrozen;
-        setSnapshot({ ...s });
+    const sim = localSimRef.current;
+    if (command === 'SET_CASE' || command === 'SWITCH_CASE') {
+      const nextCase = payload.caseNumber || payload.caseId || 1;
+      localSimRef.current = createDefaultSnapshot(nextCase);
+      localCase3ClockRef.current = 0;
+      setSnapshot({ ...localSimRef.current });
+    } else if (command === 'DISPATCH') {
+      const reset = createDefaultSnapshot(sim.selectedCase);
+      reset.isSimulationRunning = true;
+      reset.trafficCycleActive = false;
+      if (reset.selectedCase === 3) {
+        reset.ambulanceA.status = 'EN_ROUTE';
+        reset.ambulanceB.status = 'EN_ROUTE';
       }
+      localCase3ClockRef.current = 0;
+      localSimRef.current = reset;
+      setSnapshot({ ...reset });
+    } else if (command === 'FREEZE') {
+      sim.isFrozen = !sim.isFrozen;
+      setSnapshot({ ...sim });
+    } else if (command === 'NORMAL_CYCLE') {
+      const reset = createDefaultSnapshot(sim.selectedCase);
+      reset.trafficCycleActive = true;
+      reset.signalPhase = 'N_GREEN';
+      reset.signals = {
+        nGreen: true, sGreen: false, eGreen: false, wGreen: false,
+        nYellow: false, sYellow: false, eYellow: false, wYellow: false,
+      };
+      localSimRef.current = reset;
+      setSnapshot({ ...reset });
     }
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    if ('BroadcastChannel' in window) {
-      const ch = new BroadcastChannel('semtos_v2x_channel');
-      ch.onmessage = (event) => {
-        if (event.data?.type === 'SNAPSHOT' && event.data.payload) {
-          lastTwinMsgTimeRef.current = Date.now();
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Date.now() - (parsed.timestamp || 0) < 2500) {
+          lastLiveTimestampRef.current = parsed.timestamp;
           setIsLiveTwinConnected(true);
-          setSnapshot(event.data.payload);
+          setSnapshot(parsed);
         }
-      };
-      channelRef.current = ch;
-    }
+      }
+    } catch (_) {}
 
-    const pollInterval = setInterval(async () => {
-      if (Date.now() - lastTwinMsgTimeRef.current < 400) return;
-      try {
-        const res = await fetch('/api/v2x', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.snapshot && Date.now() - data.lastUpdated < 2500) {
-            lastTwinMsgTimeRef.current = Date.now();
+    const bc = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL_NAME) : null;
+    const altBc = 'BroadcastChannel' in window ? new BroadcastChannel(ALT_CHANNEL_NAME) : null;
+    channelRef.current = bc;
+    altChannelRef.current = altBc;
+
+    const onMessage = (event) => {
+      const data = event?.data;
+      if (data && data.type === 'SEMTOS_SNAPSHOT' && data.snapshot) {
+        lastLiveTimestampRef.current = Date.now();
+        setIsLiveTwinConnected(true);
+        setSnapshot(data.snapshot);
+      } else if (data && data.type === 'SNAPSHOT' && data.payload) {
+        lastLiveTimestampRef.current = Date.now();
+        setIsLiveTwinConnected(true);
+        setSnapshot(data.payload);
+      }
+    };
+
+    if (bc) bc.addEventListener('message', onMessage);
+    if (altBc) altBc.addEventListener('message', onMessage);
+
+    const standAloneTimer = setInterval(() => {
+      const age = Date.now() - lastLiveTimestampRef.current;
+      if (age < 1500) {
+        setIsLiveTwinConnected(true);
+        return;
+      }
+
+      // Try LAN polling fallback
+      fetch('/api/v2x', { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.snapshot && Date.now() - (data.lastUpdated || 0) < 2500) {
+            lastLiveTimestampRef.current = Date.now();
             setIsLiveTwinConnected(true);
             setSnapshot(data.snapshot);
-            return;
           }
-        }
-      } catch (_) {}
+        })
+        .catch(() => {});
 
-      if (Date.now() - lastTwinMsgTimeRef.current > 2000) {
-        setIsLiveTwinConnected(false);
+      if (Date.now() - lastLiveTimestampRef.current < 2000) {
+        return;
       }
-    }, 200);
+      setIsLiveTwinConnected(false);
 
-    const fallbackTick = setInterval(() => {
-      if (Date.now() - lastTwinMsgTimeRef.current <= 1200) return;
-      const s = localSimRef.current;
-      if (!s.isSimulationRunning || s.isFrozen) return;
+      const sim = localSimRef.current;
+      if (sim.isFrozen) return;
 
-      if (s.selectedCase === 1) {
-        s.ambulancePosition.x += 0.6;
-        if (s.ambulancePosition.x >= 15 && s.isPreempted) {
-          s.isPreempted = false;
-          s.signalPhase = 'E_RESUME';
-        }
-        if (s.ambulancePosition.x > 130) {
-          s.isSimulationRunning = false;
-          s.ambulancePosition.x = -120;
-          s.signalPhase = 'NORMAL_CYCLE';
-        }
-        s.vehicles.forEach((v) => {
-          if (v.type === 'E') {
-            const dist = Math.hypot(v.x - s.ambulancePosition.x, v.z - s.ambulancePosition.z);
-            if (s.isPreempted && dist <= 14 && v.x < -20 && s.ambulancePosition.x <= v.x + 30) {
-              v.state = 'YIELDING';
-              v.receivesBLE = true;
-              v.z += (v.pullOverPerp - v.z) * 0.15;
-              v.speed = 0;
-            } else {
-              v.state = 'DRIVING_GREEN';
-              v.receivesBLE = false;
-              v.z += (v.homePerp - v.z) * 0.15;
-              v.x += 0.35;
-              if (v.x > 60) v.x = -70;
-              v.speed = 7;
-            }
+      const dt = 0.08;
+
+      if (sim.selectedCase === 1) {
+        if (sim.isSimulationRunning) {
+          let nextX = sim.ambulancePosition.x + 17.5 * dt;
+          const dist = Math.abs(nextX);
+          const preempt = nextX < 18 && dist <= 105;
+          sim.isPreempted = preempt;
+
+          if (preempt) {
+            sim.signalPhase = 'EW_PREEMPT';
+            sim.signals = {
+              nGreen: false, sGreen: false, eGreen: true, wGreen: false,
+              nYellow: false, sYellow: false, eYellow: false, wYellow: false,
+            };
+          } else {
+            sim.signalPhase = 'NORMAL_CYCLE';
+            sim.signals = {
+              nGreen: false, sGreen: false, eGreen: false, wGreen: true,
+              nYellow: false, sYellow: false, eYellow: false, wYellow: false,
+            };
           }
-        });
-      } else {
-        if (s.ambulanceA.position.z > -120) {
-          s.ambulanceA.position.z -= 0.55;
-          s.ambulanceA.distanceToJunction = Math.max(0, s.ambulanceA.position.z);
-        }
-        const bPos = s.ambulanceB.position;
-        const wp = s.ambulanceB.currentWaypointIdx;
-        if (wp === 0) {
-          bPos.x -= 0.6;
-          bPos.rotation = Math.PI / 2;
-          s.ambulanceB.waypointName = 'Leg 1: Westbound Approach -> Turn 1 (X: 47)';
-          if (bPos.x <= 47.0) s.ambulanceB.currentWaypointIdx = 1;
-        } else if (wp === 1) {
-          bPos.z -= 0.6;
-          bPos.rotation = 0;
-          s.ambulanceB.waypointName = 'Leg 2: Kamaraj Rd North -> Turn 2 (Z: -60)';
-          if (bPos.z <= -60.0) s.ambulanceB.currentWaypointIdx = 2;
-        } else if (wp === 2) {
-          bPos.x -= 0.6;
-          bPos.rotation = Math.PI / 2;
-          s.ambulanceB.waypointName = 'Leg 3: Cubbon Rd West -> Turn 3 (X: -87)';
-          if (bPos.x <= -87.0) s.ambulanceB.currentWaypointIdx = 3;
-        } else if (wp === 3) {
-          bPos.z += 0.6;
-          bPos.rotation = Math.PI;
-          s.ambulanceB.waypointName = 'Leg 4: Central St South -> Rejoining M.G. Rd';
-          if (bPos.z >= -2.89) {
-            bPos.z = -2.89;
-            s.ambulanceB.currentWaypointIdx = 4;
+
+          if (nextX > 110) {
+            nextX = -120;
+            sim.isSimulationRunning = false;
+            sim.isPreempted = false;
           }
+          sim.ambulancePosition = { ...sim.ambulancePosition, x: nextX };
         } else {
-          bPos.x -= 0.6;
-          bPos.rotation = Math.PI / 2;
-          s.ambulanceB.waypointName = 'Leg 5: Westbound Departure (Bypass Complete)';
+          const phaseIdx = Math.floor((Date.now() / 6000) % 4);
+          sim.signalPhase = 'NORMAL_CYCLE';
+          sim.signals = {
+            nGreen: phaseIdx === 0,
+            sGreen: phaseIdx === 1,
+            eGreen: phaseIdx === 2,
+            wGreen: phaseIdx === 3,
+            nYellow: false, sYellow: false, eYellow: false, wYellow: false,
+          };
         }
 
-        s.vehicles.forEach((v) => {
-          if (v.type === 'N') {
-            const dist = Math.hypot(v.x - s.ambulanceA.position.x, v.z - s.ambulanceA.position.z);
-            if (v.z >= 25.0 && dist <= 28 && s.ambulanceA.position.z > v.z - 30) {
-              v.state = 'YIELDING';
-              v.receivesBLE = true;
-              v.x += (v.pullOverPerp - v.x) * 0.15;
-              v.speed = 0;
-            } else {
-              v.state = 'DRIVING_GREEN';
-              v.receivesBLE = false;
-              v.x += (v.homePerp - v.x) * 0.15;
-              v.z -= 0.35;
-              if (v.z < -70) v.z = 66;
-              v.speed = 7;
+        const ambX = sim.ambulancePosition.x;
+        const ambZ = sim.ambulancePosition.z;
+
+        sim.vehicles.forEach((v) => {
+          const distToAmb = Math.hypot(v.x - ambX, v.z - ambZ);
+          v.receivesBLE = sim.isSimulationRunning && distToAmb <= 35;
+
+          const isGreen =
+            (v.type === 'N' && sim.signals.nGreen) ||
+            (v.type === 'S' && sim.signals.sGreen) ||
+            (v.type === 'E' && sim.signals.eGreen) ||
+            (v.type === 'W' && sim.signals.wGreen);
+
+          if (v.type === 'E' && v.receivesBLE && v.x > ambX - 5) {
+            v.state = 'YIELDING';
+            v.z += (v.pullOverPerp - v.z) * 0.18;
+            v.rotY = (v.pullOverPerp - v.z) * -0.15;
+            v.speed = isGreen ? 6 : 0;
+          } else {
+            v.state = isGreen ? 'MOVING' : 'IDLE_QUEUE';
+            v.z += (v.homePerp - v.z) * 0.12;
+            v.rotY = 0;
+            v.speed = isGreen ? 12 : 0;
+          }
+
+          if (v.speed > 0) {
+            if (v.type === 'E') {
+              v.x += v.speed * dt;
+              if (v.x > 95) v.x = -95;
+            } else if (v.type === 'W') {
+              v.x -= v.speed * dt;
+              if (v.x < -95) v.x = 95;
+            } else if (v.type === 'N') {
+              v.z -= v.speed * dt;
+              if (v.z < -85) v.z = 85;
+            } else if (v.type === 'S') {
+              v.z += v.speed * dt;
+              if (v.z > 85) v.z = -85;
             }
           }
         });
+      } else if (sim.selectedCase === 3) {
+        if (sim.isSimulationRunning) {
+          localCase3ClockRef.current += dt;
+          const t = localCase3ClockRef.current;
+
+          if (t >= 1.2 && !sim.deadlockDetected) {
+            sim.deadlockDetected = true;
+            sim.isPreempted = true;
+            sim.ambulanceB.detourActive = true;
+            sim.signalPhase = 'S_GREEN_CORRIDOR';
+            sim.signals = {
+              nGreen: true, sGreen: true, eGreen: false, wGreen: false,
+              nYellow: false, sYellow: false, eYellow: false, wYellow: false,
+            };
+          }
+
+          const nextAz = sim.ambulanceA.position.z - 16.5 * dt;
+          sim.ambulanceA.position = {
+            x: 2.2,
+            y: 0.65,
+            z: nextAz,
+            rotation: 0,
+          };
+          sim.ambulanceA.distanceToJunction = Math.max(0, Math.round(nextAz));
+          if (nextAz < -95) sim.ambulanceA.status = 'CLEARED';
+
+          const waypoints = [
+            { x: 47.0, z: -2.89, rot: Math.PI / 2, label: 'Leg 1: M.G. Rd East -> WP1 Turnoff (X: 47)' },
+            { x: 47.0, z: -60.0, rot: 0, label: 'Leg 2: North Bypass -> WP2 Cubbon Rd (Z: -60)' },
+            { x: -87.0, z: -60.0, rot: Math.PI / 2, label: 'Leg 3: Cubbon Rd Westbound -> WP3 (X: -87)' },
+            { x: -87.0, z: -2.89, rot: Math.PI, label: 'Leg 4: St. Marks / Anil Kumble Return -> WP4' },
+            { x: -135.0, z: -2.89, rot: Math.PI / 2, label: 'Leg 5: M.G. Road Westbound Exit' },
+          ];
+
+          const wpIdx = sim.ambulanceB.currentWaypointIdx || 0;
+          if (wpIdx < waypoints.length) {
+            const target = waypoints[wpIdx];
+            const dx = target.x - sim.ambulanceB.position.x;
+            const dz = target.z - sim.ambulanceB.position.z;
+            const d = Math.hypot(dx, dz);
+            const step = 19.5 * dt;
+
+            sim.ambulanceB.waypointName = target.label;
+            sim.ambulanceB.position.rotation = target.rot;
+
+            if (d <= step) {
+              sim.ambulanceB.position.x = target.x;
+              sim.ambulanceB.position.z = target.z;
+              sim.ambulanceB.currentWaypointIdx = wpIdx + 1;
+            } else {
+              sim.ambulanceB.position.x += (dx / d) * step;
+              sim.ambulanceB.position.z += (dz / d) * step;
+            }
+          } else {
+            sim.ambulanceB.status = 'CLEARED';
+          }
+
+          if (sim.ambulanceA.status === 'CLEARED' && sim.ambulanceB.status === 'CLEARED') {
+            sim.isSimulationRunning = false;
+            sim.deadlockDetected = false;
+            sim.isPreempted = false;
+            sim.trafficCycleActive = true;
+            sim.signals = {
+              nGreen: false, sGreen: false, eGreen: false, wGreen: true,
+              nYellow: false, sYellow: false, eYellow: false, wYellow: false,
+            };
+          }
+
+          const ambAz = sim.ambulanceA.position.z;
+          sim.vehicles.forEach((v) => {
+            if (v.type === 'N') {
+              const distA = Math.abs(v.z - ambAz);
+              v.receivesBLE = distA < 48 && ambAz > -25;
+              if (v.receivesBLE) {
+                v.state = 'YIELDING';
+                v.x += (v.pullOverPerp - v.x) * 0.2;
+                v.rotY = v.pullOverPerp > v.homePerp ? -0.18 : 0.18;
+              } else {
+                v.x += (v.homePerp - v.x) * 0.12;
+                v.rotY = 0;
+              }
+              if (ambAz < v.z - 16 && sim.signals.nGreen) {
+                v.speed = 11.5;
+                v.z -= v.speed * dt;
+                if (v.z < -95) v.z = 85;
+              } else {
+                v.speed = 0;
+              }
+            }
+          });
+        } else if (sim.trafficCycleActive) {
+          sim.vehicles.forEach((v) => {
+            if (v.type === 'W') {
+              v.speed = 11.0;
+              v.state = 'MOVING';
+              v.x -= v.speed * dt;
+              if (v.x < -95) v.x = 85;
+            }
+          });
+        }
       }
 
-      setSnapshot({ ...s, timestamp: Date.now() });
-    }, 50);
+      setSnapshot({
+        ...sim,
+        timestamp: Date.now(),
+        vehicles: sim.vehicles.map((c) => ({ ...c })),
+        ambulancePosition: { ...sim.ambulancePosition },
+        ambulanceA: { ...sim.ambulanceA, position: { ...sim.ambulanceA.position } },
+        ambulanceB: { ...sim.ambulanceB, position: { ...sim.ambulanceB.position } },
+      });
+    }, 80);
 
     return () => {
-      clearInterval(pollInterval);
-      clearInterval(fallbackTick);
-      if (channelRef.current) channelRef.current.close();
+      clearInterval(standAloneTimer);
+      if (bc) {
+        bc.removeEventListener('message', onMessage);
+        bc.close();
+      }
+      if (altBc) {
+        altBc.removeEventListener('message', onMessage);
+        altBc.close();
+      }
     };
   }, []);
 

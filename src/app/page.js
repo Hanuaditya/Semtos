@@ -286,8 +286,8 @@ export default function Dashboard() {
   const vehiclesRef = useRef([]);
 
   const handleRemoteCommand = useCallback((command, payload) => {
-    if (command === 'SWITCH_CASE' && payload.caseId) {
-      setSelectedCase(payload.caseId);
+    if ((command === 'SWITCH_CASE' || command === 'SET_CASE') && (payload.caseId || payload.caseNumber)) {
+      setSelectedCase(payload.caseId || payload.caseNumber);
       setStarted(true);
     } else if (command === 'DISPATCH') {
       setStarted(true);
