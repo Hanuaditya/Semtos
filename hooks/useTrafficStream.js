@@ -1,3 +1,4 @@
+// hooks/useTrafficStream.js
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 // Ambulance starts far West on the main avenue and drives East (along +X).
@@ -20,6 +21,7 @@ export function useTrafficStream(useMockData = true) {
   const isFrozenRef          = useRef(false);
   const onAvenueCallbackRef  = useRef(null);
   const onClearedCallbackRef = useRef(null);
+  const onNormalCycleCallbackRef = useRef(null);
   const avenueEventFiredRef  = useRef(false);
   const clearedEventFiredRef = useRef(false);
   const xRef                 = useRef(AMB_START_X);
@@ -40,50 +42,50 @@ export function useTrafficStream(useMockData = true) {
     });
   }, []);
 
-  const onNormalCycleCallbackRef = useRef(null);
-
   // page.js calls this once to wire up signal-hook callbacks
   const registerCallbacks = useCallback((onAvenue, onCleared, onNormal) => {
-    onAvenueCallbackRef.current     = onAvenue;
-    onClearedCallbackRef.current    = onCleared;
+    onAvenueCallbackRef.current      = onAvenue;
+    onClearedCallbackRef.current     = onCleared;
     onNormalCycleCallbackRef.current = onNormal || null;
   }, []);
+
+  const dispatchCase1 = useCallback(() => {
+    if (simRunningRef.current) return;
+    simRunningRef.current = true;
+    avenueEventFiredRef.current  = false;
+    clearedEventFiredRef.current = false;
+    xRef.current = AMB_START_X;
+    addLog('Ambulance dispatched — heading East on Main Avenue.');
+    update({ isSimulationRunning: true });
+  }, [addLog, update]);
+
+  const toggleFreeze = useCallback(() => {
+    isFrozenRef.current = !isFrozenRef.current;
+    update({ isFrozen: isFrozenRef.current });
+    addLog('System ' + (isFrozenRef.current ? 'FROZEN' : 'UNFROZEN') + '.');
+  }, [addLog, update]);
 
   // ENTER key: dispatch ambulance  |  N key: start normal cycle  |  F key: freeze
   useEffect(() => {
     const onKey = (e) => {
       if (e.code === 'Enter') {
         e.preventDefault();
-        if (simRunningRef.current) return; // already running, ignore
-        simRunningRef.current = true;
-        avenueEventFiredRef.current  = false;
-        clearedEventFiredRef.current = false;
-        xRef.current = AMB_START_X;
-        addLog('Ambulance dispatched — heading East on Main Avenue.');
-        update({ isSimulationRunning: true });
-        // Signal hook: immediately preempt (handles normal-cycle interruption too)
-        if (onAvenueCallbackRef.current) {
-          // will be called again when ambulance reaches AVE_ENTRY_X,
-          // but fire early so signal switches NOW
-        }
+        dispatchCase1();
       }
       if (e.code === 'KeyN') {
         e.preventDefault();
-        // Jump straight to normal cycle
         if (onNormalCycleCallbackRef.current) {
           onNormalCycleCallbackRef.current();
           addLog('Normal cycle activated by operator.');
         }
       }
       if (e.code === 'KeyF') {
-        isFrozenRef.current = !isFrozenRef.current;
-        update({ isFrozen: isFrozenRef.current });
-        addLog('System ' + (isFrozenRef.current ? 'FROZEN' : 'UNFROZEN') + '.');
+        toggleFreeze();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addLog, update]);
+  }, [dispatchCase1, toggleFreeze, addLog]);
 
   // Ambulance movement loop
   useEffect(() => {
@@ -124,7 +126,9 @@ export function useTrafficStream(useMockData = true) {
     isSimulationRunning: state.isSimulationRunning,
     isFrozen: state.isFrozen,
     auditLogs: state.auditLogs,
-    isPreempted: false,  // managed by useTrafficSignal now
+    isPreempted: false,
     registerCallbacks,
+    dispatchCase1,
+    toggleFreeze,
   };
 }

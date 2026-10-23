@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useV2XPublisher } from '../../hooks/useV2XSync';
 import { useTrafficStream } from '../../hooks/useTrafficStream';
 import { useTrafficSignal } from '../../hooks/useTrafficSignal';
 import { useCase3TrafficStream } from '../../hooks/useCase3TrafficStream';
@@ -282,6 +283,39 @@ export default function Dashboard() {
   // Case 3 Hook
   const case3 = useCase3TrafficStream();
 
+  const vehiclesRef = useRef([]);
+
+  const handleRemoteCommand = useCallback((command, payload) => {
+    if (command === 'SWITCH_CASE' && payload.caseId) {
+      setSelectedCase(payload.caseId);
+      setStarted(true);
+    } else if (command === 'DISPATCH') {
+      setStarted(true);
+      if (selectedCase === 1) {
+        case1Stream.dispatchCase1?.();
+      } else {
+        case3.dispatchCase3?.();
+      }
+    } else if (command === 'NORMAL_CYCLE') {
+      if (selectedCase === 1) {
+        case1Signal.onNormalCycle?.();
+      }
+    } else if (command === 'FREEZE') {
+      if (selectedCase === 1) {
+        case1Stream.toggleFreeze?.();
+      }
+    }
+  }, [selectedCase, case1Stream, case1Signal, case3]);
+
+  useV2XPublisher({
+    selectedCase,
+    vehiclesRef,
+    case1Stream,
+    case1Signal,
+    case3,
+    onRemoteCommand: handleRemoteCommand,
+  });
+
   // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
     isConnected: isSerialConnected,
@@ -464,6 +498,7 @@ export default function Dashboard() {
       <div className="absolute inset-0 z-0">
         <Canvas3D
           selectedCase={selectedCase}
+          vehiclesRef={vehiclesRef}
           ambulancePosition={case1Stream.ambulancePosition}
           ambulanceA={case3.ambulanceA}
           ambulanceB={case3.ambulanceB}
@@ -579,6 +614,54 @@ export default function Dashboard() {
         gap: 8,
         fontFamily: 'monospace'
       }}>
+        <a
+          href="/ambulance"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            background: 'rgba(2, 6, 23, 0.94)',
+            color: '#10b981',
+            border: '1.5px solid #10b981',
+            borderRadius: 8,
+            padding: '7px 12px',
+            fontSize: 11,
+            fontWeight: 800,
+            textDecoration: 'none',
+            boxShadow: '0 0 14px rgba(16, 185, 129, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            letterSpacing: 1,
+          }}
+        >
+          <span>🛰️</span>
+          <span>AMB SATELLITE MAP</span>
+        </a>
+
+        <a
+          href="/driver"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            background: 'rgba(2, 6, 23, 0.94)',
+            color: '#f59e0b',
+            border: '1.5px solid #f59e0b',
+            borderRadius: 8,
+            padding: '7px 12px',
+            fontSize: 11,
+            fontWeight: 800,
+            textDecoration: 'none',
+            boxShadow: '0 0 14px rgba(245, 158, 11, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            letterSpacing: 1,
+          }}
+        >
+          <span>📱</span>
+          <span>PHONE HUD</span>
+        </a>
+
         {/* USB Serial Indicator / Button */}
         {!isSerialConnected ? (
           <button
@@ -906,25 +989,25 @@ export default function Dashboard() {
                   onClick={() => { sendByteCommand('P'); testPing('P'); }}
                   style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
-                  🟢 TEST 'P' (PREEMPTION)
+                  {"🟢 TEST 'P' (PREEMPTION)"}
                 </button>
                 <button
                   onClick={() => { sendByteCommand('G'); testPing('G'); }}
                   style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
-                  🟢 TEST 'G' (GREEN)
+                  {"🟢 TEST 'G' (GREEN)"}
                 </button>
                 <button
                   onClick={() => { sendByteCommand('Y'); testPing('Y'); }}
                   style={{ background: '#ca8a04', color: '#000', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
-                  🟡 TEST 'Y' (YELLOW)
+                  {"🟡 TEST 'Y' (YELLOW)"}
                 </button>
                 <button
                   onClick={() => { sendByteCommand('R'); testPing('R'); }}
                   style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
-                  🔴 TEST 'R' (RED)
+                  {"🔴 TEST 'R' (RED)"}
                 </button>
               </div>
             </div>
