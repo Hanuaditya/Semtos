@@ -87,6 +87,7 @@ void handleSignal() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "*");
+  server.sendHeader("Access-Control-Allow-Private-Network", "true");
 
   if (server.hasArg("cmd")) {
     String cmdStr = server.arg("cmd");
@@ -104,6 +105,7 @@ void handleOptions() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "*");
+  server.sendHeader("Access-Control-Allow-Private-Network", "true");
   server.send(204);
 }
 

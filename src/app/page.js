@@ -300,6 +300,11 @@ export default function Dashboard() {
     toggleWifi,
     lastWifiByteSent,
     wifiStatus,
+    lastResponseTime,
+    isConnecting: isWifiConnecting,
+    lastError: wifiLastError,
+    linkSuccess: wifiLinkSuccess,
+    saveAndLink,
     sendWifiCommand,
     testPing,
   } = useHardwareWifi();
@@ -786,8 +791,17 @@ export default function Dashboard() {
 
             {/* Wi-Fi V2I IP Settings */}
             <div>
-              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, marginBottom: 5 }}>
-                📶 ESP32 WI-FI IP (HOTSPOT / SOFTAP):
+              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, marginBottom: 5, display: 'flex', justifyContent: 'space-between' }}>
+                <span>📶 ESP32 WI-FI IP (HOTSPOT / SOFTAP):</span>
+                {wifiStatus === 'LINKED' && (
+                  <span style={{ color: '#22c55e', fontWeight: 800 }}>ONLINE ({lastResponseTime || 12}ms)</span>
+                )}
+                {wifiStatus === 'CONNECTING' && (
+                  <span style={{ color: '#facc15', fontWeight: 800 }}>TESTING...</span>
+                )}
+                {wifiStatus === 'ERROR' && (
+                  <span style={{ color: '#ef4444', fontWeight: 800 }}>OFFLINE</span>
+                )}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input
@@ -798,36 +812,88 @@ export default function Dashboard() {
                   style={{
                     flex: 1,
                     background: '#0f172a',
-                    border: '1px solid #475569',
+                    border: `1px solid ${wifiStatus === 'ERROR' ? '#ef4444' : wifiStatus === 'LINKED' ? '#22c55e' : '#475569'}`,
                     borderRadius: 6,
-                    padding: '5px 8px',
+                    padding: '6px 8px',
                     color: '#f8fafc',
                     fontSize: 11,
                     fontFamily: 'monospace'
                   }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      saveAndLink(tempIp, 'R');
+                    }
+                  }}
                 />
                 <button
-                  onClick={() => {
-                    updateEspIp(tempIp);
-                    toggleWifi(true);
-                  }}
+                  onClick={() => saveAndLink(tempIp, 'R')}
+                  disabled={isWifiConnecting}
                   style={{
-                    background: '#9333ea',
+                    background: isWifiConnecting
+                      ? '#475569'
+                      : wifiLinkSuccess
+                      ? '#059669'
+                      : wifiStatus === 'ERROR'
+                      ? '#b91c1c'
+                      : '#9333ea',
                     color: '#fff',
                     border: 'none',
                     borderRadius: 6,
-                    padding: '5px 10px',
+                    padding: '6px 12px',
                     fontSize: 10,
                     fontWeight: 800,
-                    cursor: 'pointer'
+                    cursor: isWifiConnecting ? 'wait' : 'pointer',
+                    boxShadow: isWifiConnecting ? 'none' : '0 0 10px rgba(147, 51, 234, 0.4)',
+                    transition: 'all 0.2s ease',
+                    whiteSpace: 'nowrap'
                   }}
                 >
-                  SAVE & LINK
+                  {isWifiConnecting ? '⏳ TESTING...' : wifiLinkSuccess ? '✅ LINKED!' : 'SAVE & LINK'}
                 </button>
               </div>
-              <div style={{ fontSize: 9, color: '#64748b', marginTop: 4 }}>
-                Target Endpoint: <code>http://{espIp}/signal?cmd=...</code>
+
+              {/* Endpoint Target info */}
+              <div style={{ fontSize: 9, color: '#64748b', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
+                <span>Target: <code>http://{espIp}/signal?cmd=...</code></span>
+                <span>Port: <strong>80 (HTTP)</strong></span>
               </div>
+
+              {/* Success Notification */}
+              {wifiLinkSuccess && (
+                <div style={{ marginTop: 6, padding: '6px 8px', background: 'rgba(34, 197, 94, 0.15)', border: '1px solid #22c55e', borderRadius: 6, fontSize: 10, color: '#4ade80' }}>
+                  ✅ <strong>Handshake Confirmed:</strong> ESP32 responded on <code>http://{espIp}</code>!
+                </div>
+              )}
+
+              {/* Diagnostic Error Banner */}
+              {wifiStatus === 'ERROR' && wifiLastError && (
+                <div style={{
+                  marginTop: 8,
+                  padding: '8px 10px',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.6)',
+                  borderRadius: 6,
+                  fontSize: 10,
+                  color: '#fca5a5'
+                }}>
+                  <div style={{ fontWeight: 800, color: '#f87171', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>⚠️</span>
+                    <span>CANNOT REACH ESP32 AT {espIp}</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: '#cbd5e1', lineHeight: 1.4, marginBottom: 6 }}>
+                    {wifiLastError}
+                  </div>
+                  <div style={{ borderTop: '1px solid rgba(239, 68, 68, 0.3)', paddingTop: 5, fontSize: 9, color: '#e2e8f0' }}>
+                    <strong>Verify checklist:</strong>
+                    <ul style={{ paddingLeft: 14, margin: '3px 0 0 0', lineHeight: 1.4 }}>
+                      <li>Ensure ESP32 is flashed with <code>firmware/esp32_traffic_light.ino</code>.</li>
+                      <li>Check Arduino Serial Monitor for the actual IP assigned by your hotspot.</li>
+                      <li>Ensure this laptop & ESP32 are on the <strong>same</strong> Wi-Fi/Hotspot.</li>
+                      <li><strong>Presentation fallback:</strong> Click <strong>[🔌 USB SERIAL]</strong> for instant wired control without Wi-Fi!</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Quick Test Triggers */}
