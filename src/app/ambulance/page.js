@@ -13,8 +13,11 @@ import {
   twinToRoadGeo,
 } from '../../../hooks/useV2XSync';
 
-if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
-  maplibregl.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
+if (typeof window !== 'undefined') {
+  window.maplibregl = maplibregl;
+  if (maplibregl.setWorkerUrl) {
+    maplibregl.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
+  }
 }
 
 // ── Free Google Maps 2D Tile Style (Streets, Hybrid Satellite, Pure Satellite) ──
@@ -164,7 +167,7 @@ export default function AmbulanceSatelliteCockpit() {
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: GOOGLE_2D_MAP_STYLE,
-      center: [77.6062, 12.9762],
+      center: [77.6055, 12.9765],
       zoom: 15.6,
       pitch: 0,
       bearing: 0,
@@ -175,6 +178,9 @@ export default function AmbulanceSatelliteCockpit() {
     map.dragRotate.disable();
     map.touchZoomRotate.disableRotation();
     map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), 'bottom-right');
+    if (typeof window !== 'undefined') {
+      window.__SEMTOS_MAP__ = map;
+    }
 
     map.on('load', () => {
       mapLoadedRef.current = true;
@@ -241,10 +247,10 @@ export default function AmbulanceSatelliteCockpit() {
 
       // ── 4-Way Signal Indicators at the Road Stop Lines around J0 (M.G. Rd & Brigade Rd) ──
       const signalArms = [
-        { arm: 'W', label: 'W (M.G. RD WEST)', lngLat: GOOGLE_ROAD_NODES.MG_METRO },
-        { arm: 'E', label: 'E (M.G. RD EAST)', lngLat: GOOGLE_ROAD_NODES.MG_CAUV_EAST },
-        { arm: 'S', label: 'S (BRIGADE RD)',   lngLat: GOOGLE_ROAD_NODES.BRIGADE_CHUR },
-        { arm: 'N', label: 'N (KAMARAJ RD)',   lngLat: GOOGLE_ROAD_NODES.KAMARAJ_S },
+        { arm: 'W', label: 'W (M.G. RD WEST)', lngLat: [77.607400, 12.975170] },
+        { arm: 'E', label: 'E (M.G. RD EAST)', lngLat: [77.608600, 12.974950] },
+        { arm: 'S', label: 'S (BRIGADE RD)',   lngLat: [77.607950, 12.974650] },
+        { arm: 'N', label: 'N (KAMARAJ RD)',   lngLat: [77.608150, 12.975550] },
       ];
 
       signalArms.forEach((sig) => {

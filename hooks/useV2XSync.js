@@ -10,40 +10,40 @@ const CMD_STORAGE_KEY = 'SEMTOS_V2X_LATEST_CMD_V1';
 // ── Precise Google Maps Road Centerline Coordinates (Bengaluru M.G. Road Corridor) ──
 // Sub-meter calibrated to 100% asphalt road centerlines in Google Maps (Streets & Satellite)
 export const ORIGIN_LNG = 77.608000;
-export const ORIGIN_LAT = 12.974850;
+export const ORIGIN_LAT = 12.975050; // J0 Central Intersection (M.G. Road & Brigade / Kamaraj Rd)
 
 export const GOOGLE_ROAD_NODES = {
   // 1. Mahatma Gandhi Road (West <-> East)
-  W_FAR_EXIT:   [77.600450, 12.975900], // CSI St. Mark's Cathedral (MG Rd West Exit)
-  ANIL_KUMBLE:  [77.601950, 12.975950], // WP4: Anil Kumble Circle (MG Rd & Central St / St Mark's Rd)
-  MG_MUSEUM:    [77.603300, 12.975650], // MG Rd near Museum Rd
-  MG_BARTON:    [77.605050, 12.975350], // MG Rd (Barton Centre)
-  MG_METRO:     [77.606790, 12.975100], // MG Rd Metro Station / Boulevard
-  J0_BRIGADE:   [77.608000, 12.974850], // WP1: Central 4-Way Signal (MG Rd & Brigade Rd / Kamaraj Rd)
-  MG_CAUV_EAST: [77.609300, 12.974450], // MG Rd East (near Shankara / Cauvery)
-  MG_MAYO_HALL: [77.610700, 12.974100], // Mayo Hall Junction (MG Rd East)
-  MG_CARIAPPA:  [77.612150, 12.973750], // MG Rd & FM Cariappa Rd (East Approach)
+  W_FAR_EXIT:   [77.600000, 12.976650], // CSI St. Mark's Cathedral (MG Rd West Exit)
+  ANIL_KUMBLE:  [77.601800, 12.976520], // WP4: Anil Kumble Circle (MG Rd & Central St / St Mark's Rd)
+  MG_MUSEUM:    [77.603600, 12.976150], // MG Rd near Museum Rd
+  MG_BARTON:    [77.605400, 12.975650], // MG Rd (Barton Centre)
+  MG_METRO:     [77.606800, 12.975300], // MG Rd Metro Station / Boulevard
+  J0_BRIGADE:   [77.608000, 12.975050], // WP1: Central 4-Way Signal (MG Rd & Brigade Rd / Kamaraj Rd)
+  MG_CAUV_EAST: [77.609400, 12.974750], // MG Rd East (near Shankara / Cauvery)
+  MG_MAYO_HALL: [77.610700, 12.974450], // Mayo Hall Junction (MG Rd East)
+  MG_CARIAPPA:  [77.612700, 12.974050], // MG Rd & FM Cariappa Rd (East Approach)
 
   // 2. Brigade Road (South) -> J0 -> Kamaraj Road (North)
-  BRIGADE_RES:  [77.607400, 12.972300], // Brigade Rd & Residency Rd (South Start near Decathlon)
-  BRIGADE_REST: [77.607600, 12.973400], // Brigade Rd & Rest House Rd
-  BRIGADE_CHUR: [77.607800, 12.974250], // Brigade Rd & Church St (South Stop Line)
-  KAMARAJ_S:    [77.608180, 12.975600], // Kamaraj Rd South (beside Parade Ground)
-  KAMARAJ_M:    [77.608380, 12.976350], // Kamaraj Rd Mid
-  CUBBON_KAM:   [77.608580, 12.977150], // WP2: Cubbon Rd & Kamaraj Rd Junction
+  BRIGADE_RES:  [77.607080, 12.972330], // Brigade Rd & Residency Rd (South Start near Decathlon / Opera)
+  BRIGADE_REST: [77.607500, 12.973700], // Brigade Rd & Rest House Rd
+  BRIGADE_CHUR: [77.607900, 12.974550], // Brigade Rd & Church St
+  KAMARAJ_S:    [77.608250, 12.976000], // Kamaraj Rd South (beside Parade Ground)
+  KAMARAJ_M:    [77.608500, 12.976700], // Kamaraj Rd Mid
+  CUBBON_KAM:   [77.608750, 12.977250], // WP2: Cubbon Rd & Kamaraj Rd Junction
 
   // 3. Cubbon Road (WP2 -> St. Andrew's -> WP3)
-  CUBBON_QORV:  [77.607600, 12.977450], // Cubbon Rd East (QORVANTA)
-  CUBBON_VEER:  [77.606200, 12.978050], // Cubbon Rd Mid (Veer Bhoomi)
-  CUBBON_MID:   [77.605200, 12.978500], // Cubbon Rd North of Parade Ground
-  CUBBON_ANDR:  [77.604200, 12.978950], // C.S.I. St. Andrew's Church, Cubbon Road
-  CUBBON_LADY:  [77.603300, 12.979300], // Cubbon Rd & Lady Curzon Rd
-  CUBBON_CENT:  [77.602500, 12.979550], // WP3: Cubbon Rd & Central St Corner
+  CUBBON_QORV:  [77.607500, 12.977620], // Cubbon Rd East (QORVANTA / Army Public School)
+  CUBBON_VEER:  [77.606600, 12.977920], // Cubbon Rd Mid (Veer Bhoomi)
+  CUBBON_MID:   [77.605400, 12.978250], // Cubbon Rd North of Parade Ground
+  CUBBON_ANDR:  [77.604300, 12.978700], // C.S.I. St. Andrew's Church, Cubbon Road
+  CUBBON_LADY:  [77.603400, 12.979050], // Cubbon Rd & Lady Curzon Rd
+  CUBBON_CENT:  [77.602380, 12.979350], // WP3: Cubbon Rd & Central St Corner (BRV Junction)
 
   // 4. Central Street (WP3 -> Anil Kumble Circle WP4)
-  CENTRAL_N:    [77.602350, 12.978600], // Central St Upper (west of Parade Ground)
-  CENTRAL_M:    [77.602200, 12.977600], // Central St Mid (BRV / Stadium)
-  CENTRAL_S:    [77.60205, 12.976600],  // Central St approaching MG Road
+  CENTRAL_N:    [77.602250, 12.978200], // Central St Upper (west of Parade Ground)
+  CENTRAL_M:    [77.602050, 12.977400], // Central St Mid (BRV / Stadium)
+  CENTRAL_S:    [77.601850, 12.976800], // Central St approaching MG Road
 };
 
 // ── Case 01 Main Avenue Stations (Mahatma Gandhi Road: X = -120 -> +150) ──
