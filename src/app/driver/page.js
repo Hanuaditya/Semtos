@@ -9,6 +9,7 @@ import {
   GOOGLE_ROAD_NODES,
   buildRoadTrafficLinesGeoJSON,
   haversineMeters,
+  twinToRoadGeo,
 } from '../../../hooks/useV2XSync';
 
 if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
@@ -78,29 +79,36 @@ export default function CivilianDriverPhoneHUD() {
 
   const activeAmb = (() => {
     if (state.selectedCase === 1) {
+      const p1 = state.case1?.ambulancePosition || { x: -120, z: -6.0 };
+      const geo1 = twinToRoadGeo(p1.x, p1.z, { ambId: 'AMB_1' });
       return {
         id: 'AMB-108',
         name: 'Ambulance 108 (M.G. Road)',
-        lngLat: state.case1?.ambulanceLngLat || GOOGLE_ROAD_NODES.ANIL_KUMBLE,
+        lngLat: geo1.lngLat,
         running: Boolean(state.case1?.isSimulationRunning),
       };
     }
-    const aPos = state.case3?.ambulanceA?.lngLat || GOOGLE_ROAD_NODES.BRIGADE_RES;
-    const bPos = state.case3?.ambulanceB?.lngLat || GOOGLE_ROAD_NODES.MG_CARIAPPA;
-    const dA = haversineMeters(activePreset.lngLat, aPos);
-    const dB = haversineMeters(activePreset.lngLat, bPos);
+    const pA = state.case3?.ambulanceA?.position || { x: 2.2, z: 90 };
+    const geoA = twinToRoadGeo(pA.x, pA.z, { ambId: 'AMB_A' });
+
+    const pB = state.case3?.ambulanceB?.position || { x: 90, z: -2.89 };
+    const wpB = state.case3?.ambulanceB?.currentWaypointIdx ?? 0;
+    const geoB = twinToRoadGeo(pB.x, pB.z, { ambId: 'AMB_B', wpIdx: wpB });
+
+    const dA = haversineMeters(activePreset.lngLat, geoA.lngLat);
+    const dB = haversineMeters(activePreset.lngLat, geoB.lngLat);
     if (dA < dB) {
       return {
         id: 'AMB-A',
         name: 'Ambulance A (Brigade Rd Priority)',
-        lngLat: aPos,
+        lngLat: geoA.lngLat,
         running: Boolean(state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive),
       };
     }
     return {
       id: 'AMB-B',
       name: 'Ambulance B (Kamaraj–Cubbon Detour)',
-      lngLat: bPos,
+      lngLat: geoB.lngLat,
       running: Boolean(state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive),
     };
   })();

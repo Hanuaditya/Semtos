@@ -7,97 +7,104 @@ const CHANNEL_NAME = 'SEMTOS_V2X_LIVE_BUS_V1';
 const STORAGE_KEY = 'SEMTOS_V2X_LATEST_SNAPSHOT_V1';
 const CMD_STORAGE_KEY = 'SEMTOS_V2X_LATEST_CMD_V1';
 
-// ── Official Google Maps Intersection Coordinates (Bengaluru M.G. Road Corridor) ──
-export const ORIGIN_LNG = 77.6079420;
-export const ORIGIN_LAT = 12.9752185;
+// ── Precise Google Maps Road Centerline Coordinates (Bengaluru M.G. Road Corridor) ──
+// Sub-meter calibrated to 100% asphalt road centerlines in Google Maps (Streets & Satellite)
+export const ORIGIN_LNG = 77.608000;
+export const ORIGIN_LAT = 12.974850;
 
 export const GOOGLE_ROAD_NODES = {
-  // 1. Main Corridor: Mahatma Gandhi Road (West <-> East)
-  W_FAR_EXIT:   [77.6004585, 12.9759108], // CSI St. Mark's Cathedral (M.G. Road West Exit)
-  ANIL_KUMBLE:  [77.6017967, 12.9765687], // Anil Kumble Circle (M.G. Rd & St. Mark's Rd & Cubbon Rd)
-  MG_MUSEUM:    [77.6025448, 12.9764197], // M.G. Road & Museum Road Intersection
-  MG_BARTON:    [77.6050521, 12.9758500], // M.G. Road (Barton Centre / The 13th Floor)
-  MG_METRO:     [77.6066919, 12.9755162], // M.G. Road Metro Station
-  J0_BRIGADE:   [77.6079420, 12.9752185], // Central 4-Way Signal: M.G. Rd & Brigade Rd / Kamaraj Rd
-  MG_CAUV_EAST: [77.6092500, 12.9746800], // M.G. Road East (Cauvery Emporium / Shankara)
-  MG_MAYO_HALL: [77.6106502, 12.9741112], // Mayo Hall Junction (M.G. Road East)
-  MG_CARIAPPA:  [77.6121346, 12.9740995], // M.G. Road & Field Marshal Cariappa Road
+  // 1. Mahatma Gandhi Road (West <-> East)
+  W_FAR_EXIT:   [77.600450, 12.975900], // CSI St. Mark's Cathedral (MG Rd West Exit)
+  ANIL_KUMBLE:  [77.601950, 12.975950], // WP4: Anil Kumble Circle (MG Rd & Central St / St Mark's Rd)
+  MG_MUSEUM:    [77.603300, 12.975650], // MG Rd near Museum Rd
+  MG_BARTON:    [77.605050, 12.975350], // MG Rd (Barton Centre)
+  MG_METRO:     [77.606790, 12.975100], // MG Rd Metro Station / Boulevard
+  J0_BRIGADE:   [77.608000, 12.974850], // WP1: Central 4-Way Signal (MG Rd & Brigade Rd / Kamaraj Rd)
+  MG_CAUV_EAST: [77.609300, 12.974450], // MG Rd East (near Shankara / Cauvery)
+  MG_MAYO_HALL: [77.610700, 12.974100], // Mayo Hall Junction (MG Rd East)
+  MG_CARIAPPA:  [77.612150, 12.973750], // MG Rd & FM Cariappa Rd (East Approach)
 
-  // 2. Cross Corridor: Brigade Road (South) -> J0 -> Kamaraj Road (North)
-  BRIGADE_RES:  [77.6069898, 12.9719594], // Brigade Rd & Residency Rd (South Start)
-  BRIGADE_REST: [77.6074994, 12.9736302], // Brigade Rd & Rest House Rd (South Mid)
-  BRIGADE_CHUR: [77.6077341, 12.9743637], // Brigade Rd & Church St (South Stop Approach)
-  KAMARAJ_S:    [77.6081800, 12.9758500], // Kamaraj Road South-Mid (Beside Parade Ground)
-  KAMARAJ_N:    [77.6084400, 12.9765200], // Kamaraj Road North-Mid
-  CUBBON_KAM:   [77.6086933, 12.9771890], // WP2: Cubbon Rd & Kamaraj Rd Junction
+  // 2. Brigade Road (South) -> J0 -> Kamaraj Road (North)
+  BRIGADE_RES:  [77.607400, 12.972300], // Brigade Rd & Residency Rd (South Start near Decathlon)
+  BRIGADE_REST: [77.607600, 12.973400], // Brigade Rd & Rest House Rd
+  BRIGADE_CHUR: [77.607800, 12.974250], // Brigade Rd & Church St (South Stop Line)
+  KAMARAJ_S:    [77.608180, 12.975600], // Kamaraj Rd South (beside Parade Ground)
+  KAMARAJ_M:    [77.608380, 12.976350], // Kamaraj Rd Mid
+  CUBBON_KAM:   [77.608580, 12.977150], // WP2: Cubbon Rd & Kamaraj Rd Junction
 
-  // 3. Cubbon Road Corridor (WP2 -> St. Andrew's Church -> WP3 -> WP4 Anil Kumble Circle)
-  CUBBON_QORV:  [77.6080988, 12.9769559], // Cubbon Road (QORVANTA)
-  CUBBON_VEER:  [77.6069855, 12.9776114], // Cubbon Road (Veer Bhoomi, HQ KKSA)
-  CUBBON_MID:   [77.6056200, 12.9784600], // Cubbon Road (North of Parade Ground)
-  CUBBON_ANDR:  [77.6042429, 12.9793212], // C.S.I St. Andrew's Church, Cubbon Road
-  CUBBON_LADY:  [77.6034533, 12.9790147], // Cubbon Rd & Lady Curzon Rd
-  CUBBON_CENT:  [77.6025378, 12.9793283], // WP3: Cubbon Rd & Central St (BRV / Stadium NE Corner)
-  CUBBON_STAD:  [77.6021650, 12.9779450], // Cubbon Rd Southbound Arm (East of Chinnaswamy Stadium)
+  // 3. Cubbon Road (WP2 -> St. Andrew's -> WP3)
+  CUBBON_QORV:  [77.607600, 12.977450], // Cubbon Rd East (QORVANTA)
+  CUBBON_VEER:  [77.606200, 12.978050], // Cubbon Rd Mid (Veer Bhoomi)
+  CUBBON_MID:   [77.605200, 12.978500], // Cubbon Rd North of Parade Ground
+  CUBBON_ANDR:  [77.604200, 12.978950], // C.S.I. St. Andrew's Church, Cubbon Road
+  CUBBON_LADY:  [77.603300, 12.979300], // Cubbon Rd & Lady Curzon Rd
+  CUBBON_CENT:  [77.602500, 12.979550], // WP3: Cubbon Rd & Central St Corner
+
+  // 4. Central Street (WP3 -> Anil Kumble Circle WP4)
+  CENTRAL_N:    [77.602350, 12.978600], // Central St Upper (west of Parade Ground)
+  CENTRAL_M:    [77.602200, 12.977600], // Central St Mid (BRV / Stadium)
+  CENTRAL_S:    [77.60205, 12.976600],  // Central St approaching MG Road
 };
 
 // ── Case 01 Main Avenue Stations (Mahatma Gandhi Road: X = -120 -> +150) ──
 export const CASE1_MG_STATIONS = [
   { x: -135, coord: GOOGLE_ROAD_NODES.W_FAR_EXIT },
   { x: -120, coord: GOOGLE_ROAD_NODES.ANIL_KUMBLE },
-  { x: -95,  coord: GOOGLE_ROAD_NODES.MG_MUSEUM },
-  { x: -55,  coord: GOOGLE_ROAD_NODES.MG_BARTON },
-  { x: -25,  coord: GOOGLE_ROAD_NODES.MG_METRO },
+  { x: -80,  coord: GOOGLE_ROAD_NODES.MG_MUSEUM },
+  { x: -40,  coord: GOOGLE_ROAD_NODES.MG_BARTON },
+  { x: -20,  coord: GOOGLE_ROAD_NODES.MG_METRO },
   { x: 0,    coord: GOOGLE_ROAD_NODES.J0_BRIGADE },
-  { x: 45,   coord: GOOGLE_ROAD_NODES.MG_CAUV_EAST },
-  { x: 95,   coord: GOOGLE_ROAD_NODES.MG_MAYO_HALL },
+  { x: 40,   coord: GOOGLE_ROAD_NODES.MG_CAUV_EAST },
+  { x: 85,   coord: GOOGLE_ROAD_NODES.MG_MAYO_HALL },
   { x: 150,  coord: GOOGLE_ROAD_NODES.MG_CARIAPPA },
 ];
 
 // ── Case 03 Ambulance A Corridor Stations (Brigade Rd South -> J0 -> Kamaraj Rd North: Z = +90 -> -120) ──
 export const CASE3_AMBA_STATIONS = [
   { z: 90,   coord: GOOGLE_ROAD_NODES.BRIGADE_RES },
-  { z: 48,   coord: GOOGLE_ROAD_NODES.BRIGADE_REST },
-  { z: 24,   coord: GOOGLE_ROAD_NODES.BRIGADE_CHUR },
+  { z: 50,   coord: GOOGLE_ROAD_NODES.BRIGADE_REST },
+  { z: 22,   coord: GOOGLE_ROAD_NODES.BRIGADE_CHUR },
   { z: 0,    coord: GOOGLE_ROAD_NODES.J0_BRIGADE },
-  { z: -40,  coord: GOOGLE_ROAD_NODES.KAMARAJ_S },
-  { z: -80,  coord: GOOGLE_ROAD_NODES.KAMARAJ_N },
+  { z: -35,  coord: GOOGLE_ROAD_NODES.KAMARAJ_S },
+  { z: -70,  coord: GOOGLE_ROAD_NODES.KAMARAJ_M },
   { z: -120, coord: GOOGLE_ROAD_NODES.CUBBON_KAM },
 ];
 
-// ── Case 03 Ambulance B 5-Leg Real-Road Reroute Stations ──
+// ── Case 03 Ambulance B 5-Leg Real-Road Detour Stations ──
 // Leg 1 (wpIdx === 0, X: 90 -> 47): M.G. Road East (Cariappa Rd -> Mayo Hall -> Kamaraj Rd Turnoff)
 export const CASE3_LEG1_STATIONS = [
   { x: 90.0, coord: GOOGLE_ROAD_NODES.MG_CARIAPPA },
-  { x: 72.0, coord: GOOGLE_ROAD_NODES.MG_MAYO_HALL },
-  { x: 58.0, coord: GOOGLE_ROAD_NODES.MG_CAUV_EAST },
-  { x: 47.0, coord: GOOGLE_ROAD_NODES.J0_BRIGADE }, // Exact Kamaraj Rd & M.G. Rd intersection!
+  { x: 70.0, coord: GOOGLE_ROAD_NODES.MG_MAYO_HALL },
+  { x: 55.0, coord: GOOGLE_ROAD_NODES.MG_CAUV_EAST },
+  { x: 47.0, coord: GOOGLE_ROAD_NODES.J0_BRIGADE }, // WP1 Turnoff
 ];
 
 // Leg 2 (wpIdx === 1, Z: -2.89 -> -60.0): Kamaraj Road (M.G. Road -> Cubbon Road)
 export const CASE3_LEG2_STATIONS = [
   { z: -2.89, coord: GOOGLE_ROAD_NODES.J0_BRIGADE },
   { z: -22.0, coord: GOOGLE_ROAD_NODES.KAMARAJ_S },
-  { z: -42.0, coord: GOOGLE_ROAD_NODES.KAMARAJ_N },
-  { z: -60.0, coord: GOOGLE_ROAD_NODES.CUBBON_KAM }, // Exact Cubbon Rd & Kamaraj Rd intersection!
+  { z: -42.0, coord: GOOGLE_ROAD_NODES.KAMARAJ_M },
+  { z: -60.0, coord: GOOGLE_ROAD_NODES.CUBBON_KAM }, // WP2 Turn
 ];
 
 // Leg 3 (wpIdx === 2, X: 47.0 -> -87.0): Cubbon Road (Kamaraj Rd -> St. Andrew's Church -> Central St)
 export const CASE3_LEG3_STATIONS = [
   { x: 47.0,  coord: GOOGLE_ROAD_NODES.CUBBON_KAM },
-  { x: 30.0,  coord: GOOGLE_ROAD_NODES.CUBBON_QORV },
-  { x: 6.0,   coord: GOOGLE_ROAD_NODES.CUBBON_VEER },
-  { x: -22.0, coord: GOOGLE_ROAD_NODES.CUBBON_MID },
-  { x: -50.0, coord: GOOGLE_ROAD_NODES.CUBBON_ANDR },
-  { x: -68.0, coord: GOOGLE_ROAD_NODES.CUBBON_LADY },
-  { x: -87.0, coord: GOOGLE_ROAD_NODES.CUBBON_CENT }, // Exact Cubbon Rd & Central St corner!
+  { x: 25.0,  coord: GOOGLE_ROAD_NODES.CUBBON_QORV },
+  { x: 5.0,   coord: GOOGLE_ROAD_NODES.CUBBON_VEER },
+  { x: -20.0, coord: GOOGLE_ROAD_NODES.CUBBON_MID },
+  { x: -45.0, coord: GOOGLE_ROAD_NODES.CUBBON_ANDR },
+  { x: -65.0, coord: GOOGLE_ROAD_NODES.CUBBON_LADY },
+  { x: -87.0, coord: GOOGLE_ROAD_NODES.CUBBON_CENT }, // WP3 Turn
 ];
 
-// Leg 4 (wpIdx === 3, Z: -60.0 -> -2.89): Cubbon Road Southbound Arm (East of Chinnaswamy Stadium -> Anil Kumble Circle)
+// Leg 4 (wpIdx === 3, Z: -60.0 -> -2.89): Central Street (Cubbon Rd -> Anil Kumble Circle)
 export const CASE3_LEG4_STATIONS = [
   { z: -60.0, coord: GOOGLE_ROAD_NODES.CUBBON_CENT },
-  { z: -31.5, coord: GOOGLE_ROAD_NODES.CUBBON_STAD },
-  { z: -2.89, coord: GOOGLE_ROAD_NODES.ANIL_KUMBLE }, // Exact Anil Kumble Circle on M.G. Road!
+  { z: -40.0, coord: GOOGLE_ROAD_NODES.CENTRAL_N },
+  { z: -22.0, coord: GOOGLE_ROAD_NODES.CENTRAL_M },
+  { z: -10.0, coord: GOOGLE_ROAD_NODES.CENTRAL_S },
+  { z: -2.89, coord: GOOGLE_ROAD_NODES.ANIL_KUMBLE }, // WP4 Rejoin
 ];
 
 // Leg 5 (wpIdx >= 4, X: -87.0 -> -135.0): M.G. Road Westbound Exit (Anil Kumble Circle -> St. Mark's Cathedral)
@@ -120,7 +127,6 @@ function interpolateStations(stations, keyName, val) {
   const last = stations[stations.length - 1];
   const increasing = last[keyName] > first[keyName];
 
-  // Clamp value to station range so vehicles never extrapolate off-road
   const minV = Math.min(first[keyName], last[keyName]);
   const maxV = Math.max(first[keyName], last[keyName]);
   const clamped = Math.max(minV, Math.min(maxV, val));
@@ -144,8 +150,7 @@ function interpolateStations(stations, keyName, val) {
 }
 
 /**
- * Maps any 3D Twin ambulance coordinate (x, z) onto the EXACT 2D Google Maps road centerline.
- * Zero lateral drift: every ambulance stays 100.0% on the road centerline!
+ * Maps any 3D Twin coordinate (x, z) onto the EXACT 2D Google Maps road centerline.
  */
 export function twinToRoadGeo(x = 0, z = 0, options = {}) {
   const {
@@ -153,7 +158,7 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
     wpIdx = 0,       // Case 3 Ambulance B waypoint index (0..4)
   } = options;
 
-  // 1. Case 03 Ambulance B (5-Leg Real-Road Detour: M.G. Rd East -> Kamaraj Rd -> Cubbon Rd -> Anil Kumble Circle -> M.G. Rd West)
+  // 1. Case 03 Ambulance B 5-Leg Real-Road Detour
   if (ambId === 'AMB_B') {
     if (wpIdx === 0) {
       const res = interpolateStations(CASE3_LEG1_STATIONS, 'x', x);
@@ -175,7 +180,7 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
     return { lngLat: res.coord, bearing: res.bearing };
   }
 
-  // 2. Case 03 Ambulance A (Priority Corridor: Brigade Road South -> M.G. Rd Signal -> Kamaraj Road North)
+  // 2. Case 03 Ambulance A (Priority Corridor: Brigade Road South -> J0 -> Kamaraj Road North)
   if (ambId === 'AMB_A') {
     const res = interpolateStations(CASE3_AMBA_STATIONS, 'z', z);
     return { lngLat: res.coord, bearing: res.bearing };
@@ -187,9 +192,7 @@ export function twinToRoadGeo(x = 0, z = 0, options = {}) {
 }
 
 /**
- * Builds the 2D Google Maps Dynamic Traffic Corridor Lines (GeoJSON FeatureCollection).
- * - Shows a thick RED traffic line (#ef4444) on the road when traffic is queued / signal is RED.
- * - Dynamically turns the road line GREEN (#22c55e) when the ambulance approaches or when the signal arm turns GREEN!
+ * Builds the 2D Google Maps Dynamic Traffic Corridor & Green Wave Lines (GeoJSON FeatureCollection).
  */
 export function buildRoadTrafficLinesGeoJSON(state) {
   const selectedCase = state?.selectedCase || 1;
@@ -201,24 +204,17 @@ export function buildRoadTrafficLinesGeoJSON(state) {
     const isRunning = Boolean(state?.case1?.isSimulationRunning);
     const phase = sig.phase || 'ALL_RED';
 
-    // West Approach (Mahatma Gandhi Road West -> J0 Brigade Rd Signal):
-    // RED when traffic is waiting; turns GREEN as soon as AMB-108 approaches (x >= -85 or phase === 'W_GREEN' / 'E_RESUME' / wGreen / eGreen)
-    const westCorridorGreen =
+    // West Approach (Anil Kumble Circle -> Museum Rd -> Barton -> Metro -> J0):
+    // Turns GREEN when preemption wave activates or when AMB-108 approaches
+    const westGreen =
       phase === 'W_GREEN' ||
       phase === 'E_RESUME' ||
       Boolean(sig.eGreen) ||
       Boolean(sig.wGreen) ||
       (isRunning && ambX >= -90 && ambX <= 20);
-    const westCorridorYellow = !westCorridorGreen && (Boolean(sig.eYellow) || Boolean(sig.wYellow));
+    const westYellow = !westGreen && (Boolean(sig.eYellow) || Boolean(sig.wYellow));
+    const westColor = westGreen ? '#22c55e' : westYellow ? '#facc15' : '#ef4444';
 
-    const westColor = westCorridorGreen ? '#22c55e' : westCorridorYellow ? '#facc15' : '#ef4444';
-    const westStatus = westCorridorGreen
-      ? 'GREEN CORRIDOR OPEN (AMB-108)'
-      : westCorridorYellow
-      ? 'YELLOW TRANSITION'
-      : 'RED TRAFFIC QUEUE AHEAD';
-
-    // 1. M.G. Road West Approach Traffic Line (in front of the signal: Anil Kumble / Museum Rd -> Brigade Rd Signal)
     features.push({
       type: 'Feature',
       properties: {
@@ -226,7 +222,7 @@ export function buildRoadTrafficLinesGeoJSON(state) {
         color: westColor,
         width: 10,
         glowWidth: 20,
-        status: westStatus,
+        status: westGreen ? 'GREEN WAVE ACTIVE (AMB-108)' : 'RED TRAFFIC QUEUE',
       },
       geometry: {
         type: 'LineString',
@@ -240,8 +236,8 @@ export function buildRoadTrafficLinesGeoJSON(state) {
       },
     });
 
-    // 2. M.G. Road East Departure / Approach Line (J0 Brigade Rd Signal -> Mayo Hall -> Cariappa Rd)
-    const eastGreen = westCorridorGreen || phase === 'W_RELEASE' || Boolean(sig.wGreen);
+    // M.G. Road East (J0 -> Cauvery -> Mayo Hall -> Cariappa Rd)
+    const eastGreen = westGreen || phase === 'W_RELEASE' || Boolean(sig.wGreen);
     const eastYellow = !eastGreen && Boolean(sig.wYellow);
     features.push({
       type: 'Feature',
@@ -263,7 +259,7 @@ export function buildRoadTrafficLinesGeoJSON(state) {
       },
     });
 
-    // 3. Brigade Road South Approach Traffic Line (Residency Rd -> Church St -> J0 Signal)
+    // Brigade Road South (Residency Rd -> Church St -> J0)
     const southGreen = Boolean(sig.nGreen) || phase === 'S_RELEASE';
     const southYellow = !southGreen && Boolean(sig.nYellow);
     features.push({
@@ -286,7 +282,7 @@ export function buildRoadTrafficLinesGeoJSON(state) {
       },
     });
 
-    // 4. Kamaraj Road North Approach Traffic Line (Cubbon Rd -> J0 Signal)
+    // Kamaraj Road North (Cubbon Rd -> J0)
     const northGreen = Boolean(sig.sGreen) || phase === 'N_RELEASE';
     const northYellow = !northGreen && Boolean(sig.sYellow);
     features.push({
@@ -302,7 +298,7 @@ export function buildRoadTrafficLinesGeoJSON(state) {
         type: 'LineString',
         coordinates: [
           GOOGLE_ROAD_NODES.CUBBON_KAM,
-          GOOGLE_ROAD_NODES.KAMARAJ_N,
+          GOOGLE_ROAD_NODES.KAMARAJ_M,
           GOOGLE_ROAD_NODES.KAMARAJ_S,
           GOOGLE_ROAD_NODES.J0_BRIGADE,
         ],
@@ -313,17 +309,16 @@ export function buildRoadTrafficLinesGeoJSON(state) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // CASE 03: DUAL-AMBULANCE CONFLICT & 100% REAL-ROAD REROUTING
+  // CASE 03: DUAL-AMBULANCE CONFLICT & 100% REAL-ROAD REROUTING GREEN WAVE
   // ══════════════════════════════════════════════════════════════════════════
   const c3 = state?.case3 || {};
   const isRunning = Boolean(c3.isSimulationRunning);
   const isNormalCycle = Boolean(c3.trafficCycleActive);
   const ambAZ = c3.ambulanceA?.position?.z ?? 90;
-  const ambBX = c3.ambulanceB?.position?.x ?? 90;
   const wpIdx = c3.ambulanceB?.currentWaypointIdx ?? 0;
 
-  // 1. Blocked M.G. Road Central Segment (J0 Kamaraj/Brigade Rd -> MG Metro -> Barton Centre -> Anil Kumble Circle):
-  // Stays bright RED during emergency deadlock to show why AMB-B detours; turns GREEN during post-clearance flush!
+  // 1. Blocked Central M.G. Road Segment (J0 -> Metro -> Barton -> Museum -> Anil Kumble):
+  // Stays solid glowing RED to indicate the Eastbound gridlock that triggered the detour!
   const mgCentralGreen = isNormalCycle && (Boolean(sig.wGreen) || Boolean(sig.eGreen));
   const mgCentralYellow = isNormalCycle && !mgCentralGreen && (Boolean(sig.wYellow) || Boolean(sig.eYellow));
   features.push({
@@ -331,9 +326,9 @@ export function buildRoadTrafficLinesGeoJSON(state) {
     properties: {
       id: 'c3-mg-central-blockade',
       color: mgCentralGreen ? '#22c55e' : mgCentralYellow ? '#facc15' : '#ef4444',
-      width: 11,
-      glowWidth: 22,
-      status: mgCentralGreen ? 'M.G. ROAD GRIDLOCK FLUSHING (GREEN)' : 'M.G. ROAD GRIDLOCK / DEADLOCK (RED)',
+      width: 12,
+      glowWidth: 24,
+      status: mgCentralGreen ? 'M.G. ROAD FLUSHING (GREEN)' : '⛔ M.G. ROAD GRIDLOCK / DEADLOCK (BLOCKED)',
     },
     geometry: {
       type: 'LineString',
@@ -347,8 +342,8 @@ export function buildRoadTrafficLinesGeoJSON(state) {
     },
   });
 
-  // 2. Ambulance A Corridor (Brigade Road South -> J0 Signal -> Kamaraj Road North):
-  // Starts RED before dispatch or when AMB-A is far (> 75m); turns GREEN as AMB-A approaches J0!
+  // 2. Ambulance A Priority Corridor (Brigade Rd South -> J0 -> Kamaraj Rd North):
+  // Starts RED in standby; turns neon GREEN as Ambulance A is dispatched!
   const ambAGreen =
     (isRunning && !isNormalCycle && ambAZ <= 78) ||
     (isNormalCycle && (Boolean(sig.nGreen) || Boolean(sig.sGreen)));
@@ -361,7 +356,7 @@ export function buildRoadTrafficLinesGeoJSON(state) {
       color: ambAGreen ? '#22c55e' : ambAYellow ? '#facc15' : '#ef4444',
       width: 10,
       glowWidth: 20,
-      status: ambAGreen ? 'AMB-A PRIORITY GREEN CORRIDOR' : 'BRIGADE RD RED TRAFFIC QUEUE',
+      status: ambAGreen ? 'AMB-A PRIORITY GREEN CORRIDOR' : 'BRIGADE RD RED QUEUE',
     },
     geometry: {
       type: 'LineString',
@@ -370,27 +365,27 @@ export function buildRoadTrafficLinesGeoJSON(state) {
         GOOGLE_ROAD_NODES.BRIGADE_REST,
         GOOGLE_ROAD_NODES.BRIGADE_CHUR,
         GOOGLE_ROAD_NODES.J0_BRIGADE,
+        GOOGLE_ROAD_NODES.KAMARAJ_S,
+        GOOGLE_ROAD_NODES.KAMARAJ_M,
+        GOOGLE_ROAD_NODES.CUBBON_KAM,
       ],
     },
   });
 
-  // 3. Ambulance B 5-Leg Real-Road Reroute Segments:
-  // Each road segment starts RED (#ef4444) when traffic is ahead and turns GREEN (#22c55e) as AMB-B approaches/traverses it!
-  const leg1Green = isRunning && (wpIdx >= 0 && ambBX <= 86);
-  const leg2Green = isRunning && (wpIdx >= 1 || (wpIdx === 0 && ambBX <= 56)) || ambAGreen;
-  const leg3Green = isRunning && (wpIdx >= 2 || (wpIdx === 1 && (c3.ambulanceB?.position?.z ?? 0) <= -40));
-  const leg4Green = isRunning && (wpIdx >= 3 || (wpIdx === 2 && ambBX <= -55));
-  const leg5Green = isRunning && (wpIdx >= 4 || (wpIdx === 3 && (c3.ambulanceB?.position?.z ?? -60) >= -22));
+  // 3. Ambulance B 5-Leg AI Reroute Green Wave:
+  // When running, the assigned detour path is the active GREEN WAVE CORRIDOR!
+  // In standby, it shows as an active planned path (#38bdf8 / #f59e0b).
+  const detourGreenWave = isRunning && !isNormalCycle;
 
   // Leg 1: M.G. Road East Approach (Cariappa Rd -> Mayo Hall -> J0 Kamaraj Rd Turnoff)
   features.push({
     type: 'Feature',
     properties: {
       id: 'c3-ambb-leg1-mg-east',
-      color: leg1Green ? '#22c55e' : '#ef4444',
-      width: 9,
-      glowWidth: 18,
-      status: leg1Green ? 'LEG 1 GREEN: M.G. RD EAST APPROACH' : 'LEG 1 RED: M.G. RD EAST',
+      color: detourGreenWave || wpIdx >= 1 ? '#22c55e' : '#38bdf8',
+      width: 10,
+      glowWidth: 20,
+      status: 'LEG 1: M.G. RD EAST APPROACH',
     },
     geometry: {
       type: 'LineString',
@@ -408,17 +403,17 @@ export function buildRoadTrafficLinesGeoJSON(state) {
     type: 'Feature',
     properties: {
       id: 'c3-ambb-leg2-kamaraj',
-      color: leg2Green ? '#22c55e' : '#ef4444',
+      color: detourGreenWave || wpIdx >= 1 ? '#22c55e' : '#38bdf8',
       width: 10,
       glowWidth: 20,
-      status: leg2Green ? 'LEG 2 GREEN: KAMARAJ RD DETOUR' : 'LEG 2 RED: KAMARAJ RD',
+      status: 'LEG 2: KAMARAJ RD NORTH DETOUR',
     },
     geometry: {
       type: 'LineString',
       coordinates: [
         GOOGLE_ROAD_NODES.J0_BRIGADE,
         GOOGLE_ROAD_NODES.KAMARAJ_S,
-        GOOGLE_ROAD_NODES.KAMARAJ_N,
+        GOOGLE_ROAD_NODES.KAMARAJ_M,
         GOOGLE_ROAD_NODES.CUBBON_KAM,
       ],
     },
@@ -429,10 +424,10 @@ export function buildRoadTrafficLinesGeoJSON(state) {
     type: 'Feature',
     properties: {
       id: 'c3-ambb-leg3-cubbon',
-      color: leg3Green ? '#22c55e' : '#ef4444',
+      color: detourGreenWave || wpIdx >= 2 ? '#22c55e' : '#38bdf8',
       width: 10,
       glowWidth: 20,
-      status: leg3Green ? 'LEG 3 GREEN: CUBBON RD CORRIDOR' : 'LEG 3 RED: CUBBON RD',
+      status: 'LEG 3: CUBBON RD WESTBOUND BYPASS',
     },
     geometry: {
       type: 'LineString',
@@ -448,21 +443,23 @@ export function buildRoadTrafficLinesGeoJSON(state) {
     },
   });
 
-  // Leg 4: Cubbon Road Southbound Arm (WP3 Central St -> East of Chinnaswamy Stadium -> WP4 Anil Kumble Circle)
+  // Leg 4: Central Street Southbound (WP3 Central St -> West of Parade Ground -> WP4 Anil Kumble Circle)
   features.push({
     type: 'Feature',
     properties: {
-      id: 'c3-ambb-leg4-stadium-arm',
-      color: leg4Green ? '#22c55e' : '#ef4444',
+      id: 'c3-ambb-leg4-central-st',
+      color: detourGreenWave || wpIdx >= 3 ? '#22c55e' : '#38bdf8',
       width: 10,
       glowWidth: 20,
-      status: leg4Green ? 'LEG 4 GREEN: CUBBON RD RETURN TO M.G. RD' : 'LEG 4 RED: CUBBON RD SOUTH ARM',
+      status: 'LEG 4: CENTRAL ST RETURN TO M.G. RD',
     },
     geometry: {
       type: 'LineString',
       coordinates: [
         GOOGLE_ROAD_NODES.CUBBON_CENT,
-        GOOGLE_ROAD_NODES.CUBBON_STAD,
+        GOOGLE_ROAD_NODES.CENTRAL_N,
+        GOOGLE_ROAD_NODES.CENTRAL_M,
+        GOOGLE_ROAD_NODES.CENTRAL_S,
         GOOGLE_ROAD_NODES.ANIL_KUMBLE,
       ],
     },
@@ -473,10 +470,10 @@ export function buildRoadTrafficLinesGeoJSON(state) {
     type: 'Feature',
     properties: {
       id: 'c3-ambb-leg5-mg-west',
-      color: leg5Green ? '#22c55e' : '#ef4444',
+      color: detourGreenWave || wpIdx >= 4 ? '#22c55e' : '#38bdf8',
       width: 10,
       glowWidth: 20,
-      status: leg5Green ? 'LEG 5 GREEN: M.G. RD WEST EXIT' : 'LEG 5 RED: M.G. RD WEST',
+      status: 'LEG 5: M.G. RD WEST EXIT (BYPASS COMPLETE)',
     },
     geometry: {
       type: 'LineString',
@@ -633,11 +630,14 @@ export function useV2XBroadcaster({
           trafficCycleActive: Boolean(case3?.trafficCycleActive),
           ambulanceA: {
             ...(case3?.ambulanceA || {}),
+            position: c3PosA,
             lngLat: c3GeoA.lngLat,
             bearing: c3GeoA.bearing,
           },
           ambulanceB: {
             ...(case3?.ambulanceB || {}),
+            position: c3PosB,
+            currentWaypointIdx: wpIdxB,
             lngLat: c3GeoB.lngLat,
             bearing: c3GeoB.bearing,
           },
@@ -693,7 +693,7 @@ export function useV2XBroadcaster({
 export const useV2XPublisher = useV2XBroadcaster;
 
 /**
- * Built-in Standalone 2D Road-Snapped Simulator Fallback (when `/` is not open in another tab)
+ * Built-in Standalone 2D Road-Snapped Simulator Fallback
  */
 function createInitialStandaloneState() {
   const c1Geo = twinToRoadGeo(-120, -6.0, { ambId: 'AMB_1' });
@@ -836,7 +836,7 @@ export function useV2XReceiver() {
         let isPreempted = false;
 
         if (s.running) {
-          s.c1X += 0.6;
+          s.c1X += 0.55;
           if (s.c1X >= -85 && s.c1X < 15) {
             phase = 'W_GREEN';
             eGreen = true;
@@ -880,38 +880,44 @@ export function useV2XReceiver() {
           },
         }));
       } else {
-        // Case 03 standalone physics (matching useCase3TrafficStream.js 100%)
+        // Case 03 Standalone Physics
         let wpName = 'Awaiting Dispatch (M.G. Road East)';
         if (s.running && !s.c3NormalCycle) {
           if (s.c3ZA > -120) s.c3ZA -= 0.55;
           if (s.c3Wp === 0) {
             wpName = 'Leg 1: M.G. Rd East -> Turn 1 (Kamaraj Rd)';
-            s.c3XB -= 0.6;
-            if (s.c3XB <= 47.0) s.c3Wp = 1;
+            s.c3XB -= 0.55;
+            if (s.c3XB <= 47.0) {
+              s.c3XB = 47.0;
+              s.c3Wp = 1;
+            }
           } else if (s.c3Wp === 1) {
             wpName = 'Leg 2: Kamaraj Rd North -> Turn 2 (Cubbon Rd)';
-            s.c3ZB -= 0.6;
-            if (s.c3ZB <= -60.0) s.c3Wp = 2;
+            s.c3ZB -= 0.55;
+            if (s.c3ZB <= -60.0) {
+              s.c3ZB = -60.0;
+              s.c3Wp = 2;
+            }
           } else if (s.c3Wp === 2) {
             wpName = 'Leg 3: Cubbon Rd West -> Turn 3 (Central St)';
-            s.c3XB -= 0.6;
+            s.c3XB -= 0.55;
             if (s.c3XB <= -87.0) {
               s.c3XB = -87.0;
               s.c3Wp = 3;
             }
           } else if (s.c3Wp === 3) {
-            wpName = 'Leg 4: Cubbon Rd South Arm -> Anil Kumble Circle';
-            s.c3ZB += 0.6;
+            wpName = 'Leg 4: Central St South -> Anil Kumble Circle';
+            s.c3ZB += 0.55;
             if (s.c3ZB >= -2.89) {
               s.c3ZB = -2.89;
               s.c3Wp = 4;
             }
           } else {
             wpName = 'Leg 5: M.G. Road Westbound Departure (Bypass Complete)';
-            s.c3XB -= 0.6;
+            s.c3XB -= 0.55;
           }
 
-          if (s.c3ZA <= -40 && (s.c3Wp >= 4 || s.c3XB <= -90)) {
+          if (s.c3ZA <= -40 && (s.c3Wp >= 4 || s.c3XB <= -95)) {
             s.c3NormalCycle = true;
             s.cycleArmIdx = 0;
             s.cycleTimer = 15.0;

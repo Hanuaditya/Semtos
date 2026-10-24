@@ -10,6 +10,7 @@ import {
   ORIGIN_LAT,
   GOOGLE_ROAD_NODES,
   buildRoadTrafficLinesGeoJSON,
+  twinToRoadGeo,
 } from '../../../hooks/useV2XSync';
 
 if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
@@ -263,10 +264,10 @@ export default function AmbulanceSatelliteCockpit() {
 
       // ── Case 03 Waypoint Badges on the Exact Real-Road Intersections ──
       const wps = [
-        { id: 'WP1', label: 'WP1: KAMARAJ RD TURN',     lngLat: GOOGLE_ROAD_NODES.J0_BRIGADE, color: '#f59e0b' },
-        { id: 'WP2', label: 'WP2: CUBBON RD TURN',      lngLat: GOOGLE_ROAD_NODES.CUBBON_KAM, color: '#38bdf8' },
-        { id: 'WP3', label: 'WP3: CENTRAL ST TURN',     lngLat: GOOGLE_ROAD_NODES.CUBBON_CENT, color: '#38bdf8' },
-        { id: 'WP4', label: 'WP4: ANIL KUMBLE REJOIN',  lngLat: GOOGLE_ROAD_NODES.ANIL_KUMBLE, color: '#22c55e' },
+        { id: 'WP1', idx: 1, label: 'WP1: KAMARAJ RD TURN',     lngLat: GOOGLE_ROAD_NODES.J0_BRIGADE, color: '#f59e0b' },
+        { id: 'WP2', idx: 2, label: 'WP2: CUBBON RD TURN',      lngLat: GOOGLE_ROAD_NODES.CUBBON_KAM, color: '#38bdf8' },
+        { id: 'WP3', idx: 3, label: 'WP3: CENTRAL ST TURN',     lngLat: GOOGLE_ROAD_NODES.CUBBON_CENT, color: '#38bdf8' },
+        { id: 'WP4', idx: 4, label: 'WP4: ANIL KUMBLE REJOIN',  lngLat: GOOGLE_ROAD_NODES.ANIL_KUMBLE, color: '#22c55e' },
       ];
 
       wps.forEach((wp) => {
@@ -280,7 +281,7 @@ export default function AmbulanceSatelliteCockpit() {
         const m = new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -10] })
           .setLngLat(wp.lngLat)
           .addTo(map);
-        waypointMarkersRef.current.push({ marker: m, el });
+        waypointMarkersRef.current.push({ marker: m, el, idx: wp.idx, label: wp.label });
       });
 
       // ── Create 2D Top-Down Ambulance Markers ──
@@ -329,9 +330,19 @@ export default function AmbulanceSatelliteCockpit() {
       trafficSrc.setData(buildRoadTrafficLinesGeoJSON(state));
     }
 
-    // 2. Show/Hide Case 03 Waypoint Badges
-    waypointMarkersRef.current.forEach(({ el }) => {
+    // 2. Show/Hide Case 03 Waypoint Badges & Update Progress Status
+    const curWp = state.case3?.ambulanceB?.currentWaypointIdx ?? 0;
+    waypointMarkersRef.current.forEach(({ el, idx, label }) => {
       el.style.display = state.selectedCase === 3 ? 'block' : 'none';
+      if (state.selectedCase === 3) {
+        const isDone = curWp >= idx;
+        const isCurrent = curWp === idx - 1;
+        const color = isDone ? '#22c55e' : isCurrent ? '#f59e0b' : '#38bdf8';
+        el.style.borderColor = color;
+        el.style.color = color;
+        el.style.boxShadow = `0 0 10px ${color}88`;
+        el.innerText = isDone ? `✓ ${label}` : isCurrent ? `◈ ${label}` : label;
+      }
     });
 
     // 3. Update 4-Way Signal Indicators
@@ -365,32 +376,34 @@ export default function AmbulanceSatelliteCockpit() {
       ambAMarkerRef.current.getElement().style.display = 'none';
       ambBMarkerRef.current.getElement().style.display = 'none';
 
-      const lngLat1 = state.case1?.ambulanceLngLat || GOOGLE_ROAD_NODES.ANIL_KUMBLE;
-      const bearing1 = state.case1?.ambulanceBearing ?? 104;
-      amb1MarkerRef.current.setLngLat(lngLat1);
-      set2DRotation(amb1MarkerRef, bearing1);
+      const p1 = state.case1?.ambulancePosition || { x: -120, z: -6.0 };
+      const geo1 = twinToRoadGeo(p1.x, p1.z, { ambId: 'AMB_1' });
+      amb1MarkerRef.current.setLngLat(geo1.lngLat);
+      set2DRotation(amb1MarkerRef, geo1.bearing);
 
       if (cameraMode === 'FOLLOW') {
-        map.easeTo({ center: lngLat1, zoom: 16.4, pitch: 0, bearing: 0, duration: 120 });
+        map.easeTo({ center: geo1.lngLat, zoom: 16.4, pitch: 0, bearing: 0, duration: 120 });
       }
     } else {
       amb1MarkerRef.current.getElement().style.display = 'none';
       ambAMarkerRef.current.getElement().style.display = 'flex';
       ambBMarkerRef.current.getElement().style.display = 'flex';
 
-      const lngLatA = state.case3?.ambulanceA?.lngLat || GOOGLE_ROAD_NODES.BRIGADE_RES;
-      const bearingA = state.case3?.ambulanceA?.bearing ?? 15;
-      const lngLatB = state.case3?.ambulanceB?.lngLat || GOOGLE_ROAD_NODES.MG_CARIAPPA;
-      const bearingB = state.case3?.ambulanceB?.bearing ?? 285;
+      const pA = state.case3?.ambulanceA?.position || { x: 2.2, z: 90 };
+      const geoA = twinToRoadGeo(pA.x, pA.z, { ambId: 'AMB_A' });
 
-      ambAMarkerRef.current.setLngLat(lngLatA);
-      set2DRotation(ambAMarkerRef, bearingA);
+      const pB = state.case3?.ambulanceB?.position || { x: 90, z: -2.89 };
+      const wpB = state.case3?.ambulanceB?.currentWaypointIdx ?? 0;
+      const geoB = twinToRoadGeo(pB.x, pB.z, { ambId: 'AMB_B', wpIdx: wpB });
 
-      ambBMarkerRef.current.setLngLat(lngLatB);
-      set2DRotation(ambBMarkerRef, bearingB);
+      ambAMarkerRef.current.setLngLat(geoA.lngLat);
+      set2DRotation(ambAMarkerRef, geoA.bearing);
+
+      ambBMarkerRef.current.setLngLat(geoB.lngLat);
+      set2DRotation(ambBMarkerRef, geoB.bearing);
 
       if (cameraMode === 'FOLLOW') {
-        const target = activeUnit === 'AMB_A' ? lngLatA : lngLatB;
+        const target = activeUnit === 'AMB_A' ? geoA.lngLat : geoB.lngLat;
         map.easeTo({ center: target, zoom: 16.3, pitch: 0, bearing: 0, duration: 120 });
       }
     }
