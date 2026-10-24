@@ -1,237 +1,200 @@
 // src/app/driver/page.js
 "use client";
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
-  useV2XSubscriber,
-  twinToRoadGeo,
-  buildTwinRoadGeoJSON,
-  build3DVehiclesGeoJSON,
-  buildBengaluru3DBuildingsGeoJSON,
-  ORIGIN_LNG,
-  ORIGIN_LAT,
+  useV2XReceiver,
+  GOOGLE_ROAD_NODES,
+  buildRoadTrafficLinesGeoJSON,
+  haversineMeters,
 } from '../../../hooks/useV2XSync';
 
-const GOOGLE_API_KEY =
-  typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-    ? `&key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}`
-    : '';
+if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
+  maplibregl.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
+}
 
-const DRIVER_GOOGLE_STYLE = {
+const GOOGLE_2D_DRIVER_STYLE = {
   version: 8,
   sources: {
-    'google-hybrid': {
+    'google-streets': {
       type: 'raster',
       tiles: [
-        `https://mt0.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
-        `https://mt1.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
+        'https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
+        'https://mt1.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
       ],
       tileSize: 256,
-      maxzoom: 20,
-    },
-    openfreemap: {
-      type: 'vector',
-      url: 'https://tiles.openfreemap.org/planet',
+      maxzoom: 21,
     },
   },
   layers: [
     {
-      id: 'google-hybrid-layer',
+      id: 'google-streets-layer',
       type: 'raster',
-      source: 'google-hybrid',
-      paint: { 'raster-contrast': 0.08, 'raster-brightness-max': 0.95 },
+      source: 'google-streets',
     },
   ],
 };
 
-export default function PhoneUserCommuterDashboard() {
-  const { snapshot, isLiveTwinConnected, sendCommand } = useV2XSubscriber();
+// Commuter Phone Locations directly on the Active Roads
+const DRIVER_PRESETS = [
+  {
+    id: 'MG_METRO',
+    label: '🚗 Commuter on M.G. Road (Near Metro Station)',
+    lngLat: GOOGLE_ROAD_NODES.MG_METRO,
+    corridor: 'M.G. Road Corridor (Case 01)',
+    yieldSide: 'PULL LEFT TOWARD CURB — CLEAR M.G. ROAD LANE',
+  },
+  {
+    id: 'BRIGADE_APPROACH',
+    label: '🚗 Commuter on Brigade Road (Case 03 AMB-A)',
+    lngLat: GOOGLE_ROAD_NODES.BRIGADE_CHUR,
+    corridor: 'Brigade Road Corridor (Case 03 AMB-A)',
+    yieldSide: 'PULL LEFT ON BRIGADE RD — CLEAR AMB-A CORRIDOR',
+  },
+  {
+    id: 'CUBBON_DETOUR',
+    label: '🚗 Commuter on Cubbon Road (Case 03 AMB-B Detour)',
+    lngLat: GOOGLE_ROAD_NODES.CUBBON_VEER,
+    corridor: 'Cubbon Road Detour (Case 03 AMB-B)',
+    yieldSide: 'YIELD ON CUBBON RD — AMB-B MACRO-DETOUR ACTIVE',
+  },
+];
 
-  const [selectedCarId, setSelectedCarId] = useState(null);
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const lastSpokenRef = useRef('');
-
+export default function CivilianDriverPhoneHUD() {
+  const { state, sendCommand } = useV2XReceiver();
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
-  const mapReadyRef = useRef(false);
-  const markersRef = useRef(new Map());
+  const mapLoadedRef = useRef(false);
+  const driverMarkerRef = useRef(null);
+  const ambMarkerRef = useRef(null);
 
-  const selectedCase = snapshot.selectedCase || 1;
-  const vehicles = useMemo(() => snapshot.vehicles || [], [snapshot.vehicles]);
+  const [presetIdx, setPresetIdx] = useState(0);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const lastSpokenAlertRef = useRef(false);
 
-  const activeCar = useMemo(() => {
-    if (!vehicles.length) return null;
-    if (selectedCarId !== null) {
-      const found = vehicles.find((v) => v.id === selectedCarId);
-      if (found) return found;
-    }
-    const yieldingCar = vehicles.find((v) => v.receivesBLE || v.state === 'YIELDING');
-    if (yieldingCar) return yieldingCar;
-    if (selectedCase === 3) {
-      return vehicles.find((v) => v.type === 'N') || vehicles[0];
-    }
-    return vehicles.find((v) => v.type === 'E') || vehicles[0];
-  }, [vehicles, selectedCarId, selectedCase]);
+  const activePreset = DRIVER_PRESETS[presetIdx] || DRIVER_PRESETS[0];
 
-  const alertInfo = useMemo(() => {
-    if (!activeCar) {
+  const activeAmb = (() => {
+    if (state.selectedCase === 1) {
       return {
-        level: 'CLEAR',
-        bannerTitle: 'NORMAL COMMUTE FLOW',
-        actionText: 'PROCEED IN CURRENT LANE',
-        subText: 'No emergency vehicles within 50m V2X BLE range.',
-        distMeters: 999,
-        pullDir: 'NONE',
+        id: 'AMB-108',
+        name: 'Ambulance 108 (M.G. Road)',
+        lngLat: state.case1?.ambulanceLngLat || GOOGLE_ROAD_NODES.ANIL_KUMBLE,
+        running: Boolean(state.case1?.isSimulationRunning),
       };
     }
-
-    let ambX = snapshot.ambulancePosition?.x ?? -120;
-    let ambZ = snapshot.ambulancePosition?.z ?? -6;
-    let ambName = 'AMB-108 (M.G. Road)';
-
-    if (selectedCase === 3) {
-      const dA = Math.hypot(
-        activeCar.x - (snapshot.ambulanceA?.position?.x ?? 2.2),
-        activeCar.z - (snapshot.ambulanceA?.position?.z ?? 90)
-      );
-      const dB = Math.hypot(
-        activeCar.x - (snapshot.ambulanceB?.position?.x ?? 90),
-        activeCar.z - (snapshot.ambulanceB?.position?.z ?? -2.89)
-      );
-      if (dA <= dB) {
-        ambX = snapshot.ambulanceA?.position?.x ?? 2.2;
-        ambZ = snapshot.ambulanceA?.position?.z ?? 90;
-        ambName = 'Ambulance A (Brigade Rd Priority)';
-      } else {
-        ambX = snapshot.ambulanceB?.position?.x ?? 90;
-        ambZ = snapshot.ambulanceB?.position?.z ?? -2.89;
-        ambName = 'Ambulance B (Cubbon Rd Detour)';
-      }
-    }
-
-    const dist = Math.round(Math.hypot(activeCar.x - ambX, activeCar.z - ambZ));
-    const isEastBlockade =
-      selectedCase === 3 && activeCar.type === 'W' && activeCar.x >= 10 && activeCar.x <= 44;
-
-    if (isEastBlockade && snapshot.deadlockDetected) {
+    const aPos = state.case3?.ambulanceA?.lngLat || GOOGLE_ROAD_NODES.BRIGADE_RES;
+    const bPos = state.case3?.ambulanceB?.lngLat || GOOGLE_ROAD_NODES.MG_CARIAPPA;
+    const dA = haversineMeters(activePreset.lngLat, aPos);
+    const dB = haversineMeters(activePreset.lngLat, bPos);
+    if (dA < dB) {
       return {
-        level: 'DIVERTED',
-        bannerTitle: 'AI DETOUR ACTIVE ON CUBBON RD',
-        actionText: 'HOLD POSITION IN EAST APPROACH QUEUE',
-        subText: 'Ambulance B has been rerouted via Cubbon Road North Block.',
-        distMeters: dist,
-        pullDir: 'HOLD',
-        ambName,
+        id: 'AMB-A',
+        name: 'Ambulance A (Brigade Rd Priority)',
+        lngLat: aPos,
+        running: Boolean(state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive),
       };
     }
-
-    if (activeCar.receivesBLE || activeCar.state === 'YIELDING') {
-      const isLeftYield =
-        activeCar.type === 'N'
-          ? activeCar.x < 2.2
-          : activeCar.type === 'E'
-          ? activeCar.z < -6.0
-          : true;
-
-      return {
-        level: 'EMERGENCY_YIELD',
-        bannerTitle: `🚨 ${ambName.toUpperCase()} APPROACHING`,
-        actionText: isLeftYield ? '⬅️ PULL OVER TO LEFT CURB NOW' : '➡️ PULL OVER TO RIGHT LANE NOW',
-        subText: `Emergency BLE packet locked (${dist}m behind you). Clear the emergency lane immediately.`,
-        distMeters: dist,
-        pullDir: isLeftYield ? 'LEFT' : 'RIGHT',
-        ambName,
-      };
-    }
-
     return {
-      level: 'CLEAR',
-      bannerTitle: 'GREEN CORRIDOR STANDBY',
-      actionText: activeCar.speed > 0.4 ? 'PROCEED WITH CAUTION' : 'STOPPED AT RED SIGNAL',
-      subText: `Nearest Ambulance (${ambName}): ${dist}m away.`,
-      distMeters: dist,
-      pullDir: 'NONE',
-      ambName,
+      id: 'AMB-B',
+      name: 'Ambulance B (Kamaraj–Cubbon Detour)',
+      lngLat: bPos,
+      running: Boolean(state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive),
     };
-  }, [activeCar, snapshot, selectedCase]);
+  })();
+
+  const distanceMeters = Math.round(haversineMeters(activePreset.lngLat, activeAmb.lngLat));
+  const isEmergencyNear = activeAmb.running && distanceMeters <= 260;
 
   useEffect(() => {
     if (!voiceEnabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    if (alertInfo.level === 'EMERGENCY_YIELD') {
-      const text = `Emergency ambulance approaching ${alertInfo.distMeters} meters behind. ${alertInfo.actionText.replace(/[^a-zA-Z0-9 ]/g, '')}`;
-      if (lastSpokenRef.current !== alertInfo.actionText) {
-        lastSpokenRef.current = alertInfo.actionText;
+    if (isEmergencyNear && !lastSpokenAlertRef.current) {
+      lastSpokenAlertRef.current = true;
+      try {
         window.speechSynthesis.cancel();
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.rate = 1.08;
+        const utter = new SpeechSynthesisUtterance(
+          `Emergency Alert! ${activeAmb.name} approaching ${distanceMeters} meters behind you. ${activePreset.yieldSide}.`
+        );
+        utter.rate = 1.05;
         window.speechSynthesis.speak(utter);
-      }
-    } else {
-      lastSpokenRef.current = '';
+      } catch (_) {}
+    } else if (!isEmergencyNear) {
+      lastSpokenAlertRef.current = false;
     }
-  }, [alertInfo, voiceEnabled]);
+  }, [isEmergencyNear, distanceMeters, activeAmb.name, activePreset.yieldSide, voiceEnabled]);
 
+  // Initialize 2D Google Map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: DRIVER_GOOGLE_STYLE,
-      center: [ORIGIN_LNG, ORIGIN_LAT],
-      zoom: 17.5,
-      pitch: 56,
-      bearing: -25,
+      style: GOOGLE_2D_DRIVER_STYLE,
+      center: activePreset.lngLat,
+      zoom: 16.0,
+      pitch: 0,
+      bearing: 0,
+      maxPitch: 0,
       attributionControl: false,
     });
 
     map.on('load', () => {
-      mapReadyRef.current = true;
-      const geo = buildTwinRoadGeoJSON(1, false);
-      map.addSource('driver-road-lines', { type: 'geojson', data: geo.lines });
+      mapLoadedRef.current = true;
+
+      map.addSource('driver-traffic-lines', {
+        type: 'geojson',
+        data: buildRoadTrafficLinesGeoJSON(state),
+      });
+
       map.addLayer({
-        id: 'driver-road-casing',
+        id: 'driver-traffic-casing',
         type: 'line',
-        source: 'driver-road-lines',
+        source: 'driver-traffic-lines',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#38bdf8',
-          'line-width': 4,
-          'line-opacity': 0.75,
+          'line-color': '#020617',
+          'line-width': ['+', ['get', 'width'], 4],
+          'line-opacity': 0.85,
         },
       });
 
-      map.addSource('driver-3d-buildings', {
-        type: 'geojson',
-        data: buildBengaluru3DBuildingsGeoJSON(),
-      });
       map.addLayer({
-        id: 'driver-3d-buildings-layer',
-        type: 'fill-extrusion',
-        source: 'driver-3d-buildings',
+        id: 'driver-traffic-core',
+        type: 'line',
+        source: 'driver-traffic-lines',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'fill-extrusion-color': ['get', 'color'],
-          'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-base': ['get', 'base'],
-          'fill-extrusion-opacity': 0.72,
+          'line-color': ['get', 'color'],
+          'line-width': ['get', 'width'],
+          'line-opacity': 0.95,
         },
       });
 
-      map.addSource('driver-3d-vehicles', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer({
-        id: 'driver-3d-vehicles-layer',
-        type: 'fill-extrusion',
-        source: 'driver-3d-vehicles',
-        paint: {
-          'fill-extrusion-color': ['get', 'color'],
-          'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-base': ['get', 'base'],
-          'fill-extrusion-opacity': 0.95,
-        },
-      });
+      // Commuter Phone Marker ("YOU")
+      const drvEl = document.createElement('div');
+      drvEl.style.cssText = `
+        width:30px;height:30px;border-radius:50%;background:#3b82f6;
+        border:3px solid #fff;box-shadow:0 0 16px #3b82f6;
+        display:flex;align-items:center;justify-content:center;font-size:14px;
+      `;
+      drvEl.innerText = '🚗';
+      driverMarkerRef.current = new maplibregl.Marker({ element: drvEl, anchor: 'center' })
+        .setLngLat(activePreset.lngLat)
+        .addTo(map);
+
+      // Incoming 2D Ambulance Marker
+      const ambEl = document.createElement('div');
+      ambEl.style.cssText = `
+        width:36px;height:36px;border-radius:50%;background:#ef4444;
+        border:3px solid #fff;box-shadow:0 0 22px #ef4444;
+        display:flex;align-items:center;justify-content:center;font-size:18px;
+      `;
+      ambEl.innerText = '🚑';
+      ambMarkerRef.current = new maplibregl.Marker({ element: ambEl, anchor: 'center' })
+        .setLngLat(activeAmb.lngLat)
+        .addTo(map);
     });
 
     mapRef.current = map;
@@ -241,186 +204,112 @@ export default function PhoneUserCommuterDashboard() {
     };
   }, []);
 
+  // Update markers & dynamic red-to-green traffic lines
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
+    if (!map || !mapLoadedRef.current) return;
 
-    const geo = buildTwinRoadGeoJSON(selectedCase, Boolean(snapshot.ambulanceB?.detourActive));
-    map.getSource('driver-road-lines')?.setData(geo.lines);
+    driverMarkerRef.current?.setLngLat(activePreset.lngLat);
+    ambMarkerRef.current?.setLngLat(activeAmb.lngLat);
 
-    const activeAmbUnits = [];
-    if (selectedCase === 1 && snapshot.ambulancePosition) {
-      const r1 = twinToRoadGeo(snapshot.ambulancePosition.x, snapshot.ambulancePosition.z, {
-        isAmbulance: true,
-        ambId: 'AMB_1',
-      });
-      activeAmbUnits.push({ id: 'AMB_1', lngLat: r1.lngLat, bearing: r1.bearing, color: '#ef4444' });
-    } else if (selectedCase === 3) {
-      if (snapshot.ambulanceA?.position) {
-        const rA = twinToRoadGeo(snapshot.ambulanceA.position.x, snapshot.ambulanceA.position.z, {
-          isAmbulance: true,
-          ambId: 'AMB_A',
-        });
-        activeAmbUnits.push({ id: 'AMB_A', lngLat: rA.lngLat, bearing: rA.bearing, color: '#3b82f6' });
-      }
-      if (snapshot.ambulanceB?.position) {
-        const rB = twinToRoadGeo(snapshot.ambulanceB.position.x, snapshot.ambulanceB.position.z, {
-          isAmbulance: true,
-          ambId: 'AMB_B',
-          wpIdx: snapshot.ambulanceB.currentWaypointIdx || 0,
-        });
-        activeAmbUnits.push({ id: 'AMB_B', lngLat: rB.lngLat, bearing: rB.bearing, color: '#f59e0b' });
-      }
-    }
-
-    map.getSource('driver-3d-vehicles')?.setData(
-      build3DVehiclesGeoJSON(vehicles, activeAmbUnits, selectedCase)
-    );
-
-    if (activeCar) {
-      const snappedCar = twinToRoadGeo(activeCar.x, activeCar.z, {
-        carType: activeCar.type,
-        rotY: activeCar.rotY,
-        isAmbulance: false,
-      });
-
-      let m = markersRef.current.get('MY_CAR');
-      if (!m) {
-        const el = document.createElement('div');
-        m = new maplibregl.Marker({ element: el, anchor: 'center' })
-          .setLngLat(snappedCar.lngLat)
-          .addTo(map);
-        markersRef.current.set('MY_CAR', m);
-      } else {
-        m.setLngLat(snappedCar.lngLat);
-      }
-
-      m.getElement().innerHTML = `
-        <div style="
-          padding: 2px 6px;
-          border-radius: 999px;
-          background: #10b981;
-          border: 2px solid #fff;
-          color: #020617;
-          font-family: monospace;
-          font-size: 9px;
-          font-weight: 900;
-          box-shadow: 0 0 14px #10b981;
-          white-space: nowrap;
-        ">YOU (#${activeCar.id})</div>
-      `;
-
-      map.easeTo({
-        center: snappedCar.lngLat,
-        zoom: 17.6,
-        pitch: 58,
-        bearing: snappedCar.bearing,
-        duration: 220,
-      });
-    }
-  }, [snapshot, activeCar, selectedCase, vehicles]);
+    const src = map.getSource('driver-traffic-lines');
+    if (src) src.setData(buildRoadTrafficLinesGeoJSON(state));
+  }, [state, activePreset, activeAmb.lngLat]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-between p-3 font-sans select-none">
-      {/* TOP BAR */}
-      <div className="w-full max-w-md flex items-center justify-between bg-slate-900/90 border border-slate-800 px-3.5 py-2.5 rounded-2xl">
-        <div className="flex items-center gap-2">
-          <a
-            href="/ambulance"
-            className="px-2 py-1 rounded bg-slate-800 text-[10px] font-mono text-slate-300"
-          >
-            ← SATELLITE COCKPIT
-          </a>
-          <span className="text-xs font-black font-mono text-emerald-400">
-            📱 V2X COMMUTER HUD
-          </span>
-        </div>
-        <span className="text-[10px] font-mono text-slate-400">
-          {isLiveTwinConnected ? '● 3D TWIN SYNC' : '● GOOGLE MAPS 3D SIM'}
-        </span>
+    <div style={{
+      minHeight: '100vh', background: '#020617', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: 'monospace', color: '#f8fafc'
+    }}>
+      <div style={{ width: '100%', maxWidth: 460, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <a href="/" style={{ color: '#94a3b8', fontSize: 11, textDecoration: 'none', fontWeight: 800 }}>← 3D TWIN CMD</a>
+        <span style={{ fontSize: 11, color: '#38bdf8', fontWeight: 800 }}>SEMTOS V2X COMMUTER PHONE HUD</span>
+        <a href="/ambulance" style={{ color: '#22c55e', fontSize: 11, textDecoration: 'none', fontWeight: 800 }}>2D AMB MAP →</a>
       </div>
 
-      {/* MAIN PHONE CARD */}
-      <div className="w-full max-w-md my-2 flex-1 flex flex-col justify-between bg-slate-900/90 border border-slate-800 rounded-3xl p-4 shadow-2xl space-y-3">
-        {/* CASE & VEHICLE SELECTOR */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex gap-1">
-            <button
-              onClick={() => sendCommand('SET_CASE', { caseNumber: 1 })}
-              className={`px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold ${
-                selectedCase === 1 ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              CASE 01
-            </button>
-            <button
-              onClick={() => sendCommand('SET_CASE', { caseNumber: 3 })}
-              className={`px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold ${
-                selectedCase === 3 ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              CASE 03
-            </button>
+      {/* Smartphone Frame */}
+      <div style={{
+        width: '100%', maxWidth: 460, height: '86vh', background: '#0f172a',
+        border: `3px solid ${isEmergencyNear ? '#ef4444' : '#334155'}`,
+        borderRadius: 32, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        boxShadow: isEmergencyNear ? '0 0 50px rgba(239, 68, 68, 0.65)' : '0 20px 50px rgba(0,0,0,0.8)',
+        position: 'relative'
+      }}>
+        {/* Top Alert Banner */}
+        <div style={{
+          padding: '16px 18px',
+          background: isEmergencyNear
+            ? 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)'
+            : 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          borderBottom: '1px solid #334155', zIndex: 10
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: isEmergencyNear ? '#fef08a' : '#22c55e' }}>
+              {isEmergencyNear ? '🚨 BLE + V2X EMERGENCY ALERT' : '🟢 NORMAL NAVIGATION (2D GOOGLE MAPS)'}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 900, background: 'rgba(0,0,0,0.35)', padding: '2px 8px', borderRadius: 12 }}>
+              {distanceMeters}m AWAY
+            </span>
           </div>
 
+          <div style={{ fontSize: 17, fontWeight: 900, color: '#fff', lineHeight: 1.25 }}>
+            {isEmergencyNear ? `⬅️ ${activePreset.yieldSide}` : 'Road Clear — Monitoring BLE & V2X Beacons'}
+          </div>
+        </div>
+
+        {/* 2D Google Map View */}
+        <div style={{ flex: 1, position: 'relative' }}>
+          <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }} />
+        </div>
+
+        {/* Bottom Controls */}
+        <div style={{ padding: 14, background: '#020617', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <select
-            value={activeCar?.id || ''}
-            onChange={(e) => setSelectedCarId(Number(e.target.value))}
-            className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-mono text-slate-200"
+            value={presetIdx}
+            onChange={(e) => {
+              const idx = Number(e.target.value);
+              setPresetIdx(idx);
+              mapRef.current?.flyTo({ center: DRIVER_PRESETS[idx].lngLat, zoom: 16.0, duration: 600 });
+            }}
+            style={{
+              width: '100%', background: '#0f172a', color: '#f8fafc', border: '1px solid #334155',
+              borderRadius: 8, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace', fontWeight: 700
+            }}
           >
-            {vehicles.map((v) => (
-              <option key={v.id} value={v.id}>
-                Car #{v.id} ({v.type} Approach) {v.receivesBLE ? '🚨 BLE' : ''}
-              </option>
+            {DRIVER_PRESETS.map((p, i) => (
+              <option key={p.id} value={i}>{p.label}</option>
             ))}
           </select>
-        </div>
 
-        {/* GIANT ALERT BANNER */}
-        <div
-          className={`rounded-2xl p-4 border-2 text-center transition-all ${
-            alertInfo.level === 'EMERGENCY_YIELD'
-              ? 'bg-red-950/90 border-red-500 shadow-[0_0_30px_rgba(239,68,68,0.35)] animate-pulse'
-              : alertInfo.level === 'DIVERTED'
-              ? 'bg-amber-950/90 border-amber-400'
-              : 'bg-slate-950/90 border-slate-800'
-          }`}
-        >
-          <div className="text-[10px] font-mono uppercase tracking-widest text-slate-300">
-            {alertInfo.bannerTitle}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => sendCommand('DISPATCH')}
+              style={{
+                flex: 1, background: '#22c55e', color: '#020617', border: 'none',
+                borderRadius: 8, padding: '8px 0', fontSize: 11, fontWeight: 900, cursor: 'pointer'
+              }}
+            >
+              ▶ DISPATCH [ENTER]
+            </button>
+            <button
+              onClick={() => sendCommand('SWITCH_CASE', { caseId: state.selectedCase === 1 ? 3 : 1 })}
+              style={{
+                flex: 1, background: '#1e293b', color: '#f59e0b', border: '1px solid #f59e0b',
+                borderRadius: 8, padding: '8px 0', fontSize: 11, fontWeight: 900, cursor: 'pointer'
+              }}
+            >
+              SWITCH TO CASE {state.selectedCase === 1 ? '03' : '01'}
+            </button>
+            <button
+              onClick={() => setVoiceEnabled((v) => !v)}
+              style={{
+                background: voiceEnabled ? '#0284c7' : '#1e293b', color: '#fff', border: 'none',
+                borderRadius: 8, padding: '8px 10px', fontSize: 11, fontWeight: 900, cursor: 'pointer'
+              }}
+            >
+              {voiceEnabled ? '🔊 TTS' : '🔇'}
+            </button>
           </div>
-          <div className="text-xl font-black tracking-wide text-white mt-1">
-            {alertInfo.actionText}
-          </div>
-          <div className="text-xs text-slate-300 mt-1">{alertInfo.subText}</div>
-        </div>
-
-        {/* LIVE GOOGLE MAPS 3D MINI-MAP */}
-        <div className="relative w-full h-64 rounded-2xl overflow-hidden border border-slate-800">
-          <div ref={mapContainerRef} className="w-full h-full" />
-          <div className="absolute top-2 left-2 bg-slate-950/85 px-2.5 py-1 rounded-lg border border-slate-800 text-[10px] font-mono text-slate-300">
-            Car #{activeCar?.id || 1} • Road-Snapped 3D View
-          </div>
-        </div>
-
-        {/* ACTION BAR */}
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <button
-            onClick={() => sendCommand('DISPATCH')}
-            className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-mono font-black text-xs"
-          >
-            ▶ DISPATCH EMERGENCY
-          </button>
-          <button
-            onClick={() => setVoiceEnabled((v) => !v)}
-            className={`px-3 py-2.5 rounded-xl font-mono text-xs font-bold border ${
-              voiceEnabled
-                ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
-                : 'bg-slate-800 border-slate-700 text-slate-400'
-            }`}
-          >
-            {voiceEnabled ? '🔊 TTS ON' : '🔇 TTS OFF'}
-          </button>
         </div>
       </div>
     </div>

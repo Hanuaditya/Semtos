@@ -1,70 +1,67 @@
 // src/app/ambulance/page.js
 "use client";
 
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
-  useV2XSubscriber,
-  twinToRoadGeo,
-  buildTwinRoadGeoJSON,
-  build3DVehiclesGeoJSON,
-  buildBengaluru3DBuildingsGeoJSON,
-  GOOGLE_ROAD_NODES,
+  useV2XReceiver,
   ORIGIN_LNG,
   ORIGIN_LAT,
+  GOOGLE_ROAD_NODES,
+  buildRoadTrafficLinesGeoJSON,
 } from '../../../hooks/useV2XSync';
 
-// ── Google Maps Free Tile Servers + OpenFreeMap 3D Vector Building Tiles ──
-const GOOGLE_API_KEY =
-  typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-    ? `&key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}`
-    : '';
+if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
+  maplibregl.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
+}
 
-const GOOGLE_MAPS_STYLE = {
+// ── Free Google Maps 2D Tile Style (Streets, Hybrid Satellite, Pure Satellite) ──
+const GOOGLE_2D_MAP_STYLE = {
   version: 8,
   sources: {
+    'google-streets': {
+      type: 'raster',
+      tiles: [
+        'https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
+        'https://mt1.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
+      ],
+      tileSize: 256,
+      maxzoom: 21,
+      attribution: '© Google Maps',
+    },
     'google-hybrid': {
       type: 'raster',
       tiles: [
-        `https://mt0.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
-        `https://mt1.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
-        `https://mt2.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
-        `https://mt3.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
+        'https://mt0.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}',
+        'https://mt1.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}',
       ],
       tileSize: 256,
-      maxzoom: 20,
-      attribution: 'Google Maps Satellite Hybrid + 3D Buildings',
+      maxzoom: 21,
+      attribution: '© Google Maps Satellite',
     },
     'google-satellite': {
       type: 'raster',
       tiles: [
-        `https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
-        `https://mt1.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
+        'https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}',
+        'https://mt1.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}',
       ],
       tileSize: 256,
-      maxzoom: 20,
-    },
-    'google-roadmap': {
-      type: 'raster',
-      tiles: [
-        `https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
-        `https://mt1.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}${GOOGLE_API_KEY}`,
-      ],
-      tileSize: 256,
-      maxzoom: 20,
-    },
-    // Free global OpenMapTiles vector source for real 3D building footprints in Bengaluru
-    openfreemap: {
-      type: 'vector',
-      url: 'https://tiles.openfreemap.org/planet',
+      maxzoom: 21,
+      attribution: '© Google Satellite',
     },
   },
   layers: [
     {
-      id: 'google-roadmap-layer',
+      id: 'google-streets-layer',
       type: 'raster',
-      source: 'google-roadmap',
+      source: 'google-streets',
+      layout: { visibility: 'visible' },
+    },
+    {
+      id: 'google-hybrid-layer',
+      type: 'raster',
+      source: 'google-hybrid',
       layout: { visibility: 'none' },
     },
     {
@@ -73,72 +70,78 @@ const GOOGLE_MAPS_STYLE = {
       source: 'google-satellite',
       layout: { visibility: 'none' },
     },
-    {
-      id: 'google-hybrid-layer',
-      type: 'raster',
-      source: 'google-hybrid',
-      paint: {
-        'raster-contrast': 0.08,
-        'raster-brightness-max': 0.96,
-      },
-    },
   ],
 };
 
-function createGeoCircle(centerLngLat, radiusMeters, points = 48) {
-  const [lng, lat] = centerLngLat;
-  const coords = [];
-  const dLat = radiusMeters / 110630.0;
-  const dLng = radiusMeters / 108460.0;
-  for (let i = 0; i <= points; i++) {
-    const theta = (i / points) * (Math.PI * 2);
-    coords.push([lng + dLng * Math.cos(theta), lat + dLat * Math.sin(theta)]);
-  }
-  return {
-    type: 'Feature',
-    properties: {},
-    geometry: { type: 'Polygon', coordinates: [coords] },
-  };
+// ── Clean 2D Top-Down Ambulance SVG Icon (Rotates 100% along Road Bearing) ──
+function create2DAmbulanceElement(label, borderColor, badgeBg) {
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'position:relative;width:54px;height:54px;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:60;';
+
+  const pulse = document.createElement('div');
+  pulse.style.cssText = `
+    position:absolute;width:50px;height:50px;border-radius:50%;
+    background:${borderColor}33;border:2px solid ${borderColor};
+    animation:ambPulse2D 1.1s infinite ease-out;
+  `;
+
+  const rotor = document.createElement('div');
+  rotor.className = 'amb-2d-rotor';
+  rotor.style.cssText = 'width:38px;height:38px;display:flex;align-items:center;justify-content:center;transition:transform 0.06s linear;filter:drop-shadow(0 3px 8px rgba(0,0,0,0.65));';
+  rotor.innerHTML = `
+    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- White 2D Top-Down Ambulance Chassis Pointing North (0 deg) -->
+      <rect x="8" y="2" width="20" height="32" rx="5" fill="#ffffff" stroke="${borderColor}" stroke-width="2.5"/>
+      <!-- Front Windshield (North / Top) -->
+      <path d="M10 9 C10 6, 26 6, 26 9 L25 13 L11 13 Z" fill="#0f172a"/>
+      <!-- Red Emergency Cross on Roof -->
+      <rect x="16" y="16" width="4" height="10" rx="1" fill="#ef4444"/>
+      <rect x="13" y="19" width="10" height="4" rx="1" fill="#ef4444"/>
+      <!-- Flashing Roof Lightbar -->
+      <rect x="11" y="13.2" width="6.5" height="2.2" rx="1" fill="#ef4444"/>
+      <rect x="18.5" y="13.2" width="6.5" height="2.2" rx="1" fill="#3b82f6"/>
+    </svg>
+  `;
+
+  const tag = document.createElement('div');
+  tag.style.cssText = `
+    position:absolute;top:-22px;white-space:nowrap;
+    background:${badgeBg};color:#fff;border:1.5px solid ${borderColor};
+    font-family:monospace;font-size:10px;font-weight:900;
+    padding:2px 7px;border-radius:5px;letter-spacing:0.6px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.7);
+  `;
+  tag.innerText = label;
+
+  wrapper.appendChild(pulse);
+  wrapper.appendChild(rotor);
+  wrapper.appendChild(tag);
+  return wrapper;
 }
 
-export default function AmbulanceDriverSatelliteDashboard() {
-  const { snapshot, isLiveTwinConnected, sendCommand } = useV2XSubscriber();
-
+export default function AmbulanceSatelliteCockpit() {
+  const { state, sendCommand } = useV2XReceiver();
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
-  const mapReadyRef = useRef(false);
+  const mapLoadedRef = useRef(false);
 
-  const carMarkersRef = useRef(new Map());
-  const carBearingsRef = useRef(new Map());
-  const signalMarkersRef = useRef(new Map());
-  const wpMarkersRef = useRef(new Map());
-  const ambMarkersRef = useRef(new Map());
+  const amb1MarkerRef = useRef(null);
+  const ambAMarkerRef = useRef(null);
+  const ambBMarkerRef = useRef(null);
+  const signalMarkersRef = useRef({});
+  const waypointMarkersRef = useRef([]);
 
-  const [activeUnit, setActiveUnit] = useState('AMB_B');
-  const [cameraLock, setCameraLock] = useState('JUNCTION'); // 'DETOUR_OVERVIEW' | 'FOLLOW' | 'JUNCTION' | 'FREE'
-  const [mapTheme, setMapTheme] = useState('GOOGLE_HYBRID'); // 'GOOGLE_HYBRID' | 'GOOGLE_SATELLITE' | 'GOOGLE_STREETS'
-  const [buildings3DEnabled, setBuildings3DEnabled] = useState(true);
-  const [globeEnabled, setGlobeEnabled] = useState(true);
-  const [liveGpsActive, setLiveGpsActive] = useState(false);
-  const [userGpsCoord, setUserGpsCoord] = useState(null);
+  const [activeUnit, setActiveUnit] = useState('AMB_B'); // 'AMB_1' | 'AMB_A' | 'AMB_B'
+  const [cameraMode, setCameraMode] = useState('OVERVIEW'); // 'OVERVIEW' | 'FOLLOW' | 'JUNCTION' | 'FREE'
+  const [mapStyleMode, setMapStyleMode] = useState('STREETS'); // 'STREETS' | 'HYBRID' | 'SATELLITE'
 
-  const selectedCase = snapshot.selectedCase || 1;
-  const signals = useMemo(() => snapshot.signals || {}, [snapshot.signals]);
-
-  // Sync SVG car roof rotations whenever the user rotates the map camera
-  const syncMarkerRotationsWithMap = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const mapBrg = map.getBearing() || 0;
-    for (const [id, marker] of carMarkersRef.current.entries()) {
-      const roadBrg = carBearingsRef.current.get(id) ?? 0;
-      const svgEl = marker.getElement()?.querySelector('.semtos-car-rot');
-      if (svgEl) {
-        const screenDeg = (roadBrg - mapBrg + 360) % 360;
-        svgEl.style.transform = `rotate(${screenDeg.toFixed(1)}deg)`;
-      }
+  useEffect(() => {
+    if (state.selectedCase === 1) {
+      setActiveUnit('AMB_1');
+    } else if (state.selectedCase === 3 && activeUnit === 'AMB_1') {
+      setActiveUnit('AMB_B');
     }
-  }, []);
+  }, [state.selectedCase, activeUnit]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -147,1043 +150,552 @@ export default function AmbulanceDriverSatelliteDashboard() {
         sendCommand('DISPATCH');
       } else if (e.code === 'KeyF') {
         sendCommand('FREEZE');
-      } else if (e.code === 'KeyN') {
-        sendCommand('NORMAL_CYCLE');
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [sendCommand]);
 
-  useEffect(() => {
-    if (!liveGpsActive || typeof navigator === 'undefined' || !navigator.geolocation) return;
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        setUserGpsCoord([pos.coords.longitude, pos.coords.latitude]);
-      },
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 1000 }
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [liveGpsActive]);
-
-  // Initialize Google Maps Satellite + 3D Buildings + Globe Viewport
+  // ── Initialize Pure 2D Top-Down Google Map (pitch: 0, bearing: 0) ──
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: GOOGLE_MAPS_STYLE,
-      center: [ORIGIN_LNG, ORIGIN_LAT],
-      zoom: 17.5,
-      pitch: 58,
-      bearing: -25,
-      antialias: true,
+      style: GOOGLE_2D_MAP_STYLE,
+      center: [77.6062, 12.9762],
+      zoom: 15.6,
+      pitch: 0,
+      bearing: 0,
+      maxPitch: 0, // Lock strictly to 2D Top-Down so roads and ambulances never distort
+      attributionControl: false,
     });
 
-    map.addControl(
-      new maplibregl.NavigationControl({ visualizePitch: true, showCompass: true }),
-      'bottom-right'
-    );
-
-    map.on('dragstart', () => {
-      setCameraLock('FREE');
-    });
-
-    map.on('rotate', () => {
-      syncMarkerRotationsWithMap();
-    });
+    map.dragRotate.disable();
+    map.touchZoomRotate.disableRotation();
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), 'bottom-right');
 
     map.on('load', () => {
-      mapReadyRef.current = true;
+      mapLoadedRef.current = true;
 
-      // Enable 3D Globe Projection when supported by MapLibre GL
-      try {
-        if (typeof map.setProjection === 'function') {
-          map.setProjection({ type: 'globe' });
-        }
-      } catch (_) {}
-
-      const initialRoadGeo = buildTwinRoadGeoJSON(1, false);
-
-      map.addSource('twin-road-lines', {
+      // ── Dynamic Red-to-Green Traffic Corridor Lines Source & Layers ──
+      map.addSource('traffic-corridor-lines', {
         type: 'geojson',
-        data: initialRoadGeo.lines,
+        data: buildRoadTrafficLinesGeoJSON(state),
       });
 
-      // Base M.G. Road & Brigade/Kamaraj Road highlight
+      // Outer Dark Road Casing for High Contrast on Google Streets & Satellite
       map.addLayer({
-        id: 'twin-main-road-casing',
+        id: 'traffic-lines-casing',
         type: 'line',
-        source: 'twin-road-lines',
-        filter: ['in', ['get', 'kind'], ['literal', ['main_road_line', 'cross_road_line']]],
+        source: 'traffic-corridor-lines',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#0f172a',
-          'line-width': 14,
-          'line-opacity': 0.55,
-        },
-      });
-
-      // Case 01 West->East Preemption Green Corridor along M.G. Road
-      map.addLayer({
-        id: 'twin-case1-corridor',
-        type: 'line',
-        source: 'twin-road-lines',
-        filter: ['==', ['get', 'kind'], 'amb_corridor_case1'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#10b981',
-          'line-width': 8,
-          'line-opacity': 0.8,
-        },
-      });
-
-      // Case 03 Ambulance A South->North Priority Corridor (Brigade Rd -> Kamaraj Rd)
-      map.addLayer({
-        id: 'twin-amb-a-corridor',
-        type: 'line',
-        source: 'twin-road-lines',
-        filter: ['==', ['get', 'kind'], 'amb_a_corridor'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#3b82f6',
-          'line-width': 8,
+          'line-color': '#020617',
+          'line-width': ['+', ['get', 'width'], 5],
           'line-opacity': 0.85,
         },
       });
 
-      // Case 03 Ambulance B 5-Leg Detour (East Bypass -> Cubbon Rd -> St. Mark's/Anil Kumble)
+      // Soft Neon Glow Halo (Red when traffic is queued, Green when ambulance approaches)
       map.addLayer({
-        id: 'twin-amb-b-detour-glow',
+        id: 'traffic-lines-glow',
         type: 'line',
-        source: 'twin-road-lines',
-        filter: ['==', ['get', 'kind'], 'amb_b_detour'],
+        source: 'traffic-corridor-lines',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#00f5ff',
-          'line-width': 14,
-          'line-opacity': 0.38,
-          'line-blur': 4,
-        },
-      });
-
-      map.addLayer({
-        id: 'twin-amb-b-detour-core',
-        type: 'line',
-        source: 'twin-road-lines',
-        filter: ['==', ['get', 'kind'], 'amb_b_detour'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#00f5ff',
-          'line-width': 5,
-          'line-dasharray': [2, 1.5],
-          'line-opacity': 0.95,
-        },
-      });
-
-      // Case 03 East Approach Gridlock Blockade Zone on M.G. Road
-      map.addLayer({
-        id: 'twin-east-blockade',
-        type: 'line',
-        source: 'twin-road-lines',
-        filter: ['==', ['get', 'kind'], 'east_blockade'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#ef4444',
-          'line-width': 13,
-          'line-opacity': 0.55,
-        },
-      });
-
-      // BLE Preemption Dome Source
-      map.addSource('ble-dome-source', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-
-      map.addLayer({
-        id: 'ble-dome-fill',
-        type: 'fill',
-        source: 'ble-dome-source',
-        paint: {
-          'fill-color': ['get', 'color'],
-          'fill-opacity': 0.16,
-        },
-      });
-
-      map.addLayer({
-        id: 'ble-dome-stroke',
-        type: 'line',
-        source: 'ble-dome-source',
         paint: {
           'line-color': ['get', 'color'],
+          'line-width': ['get', 'glowWidth'],
+          'line-opacity': 0.35,
+          'line-blur': 5,
+        },
+      });
+
+      // Solid Core Traffic Line Directly on the Road Asphalt
+      map.addLayer({
+        id: 'traffic-lines-core',
+        type: 'line',
+        source: 'traffic-corridor-lines',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': ['get', 'width'],
+          'line-opacity': 0.96,
+        },
+      });
+
+      // Directional Flow Chevrons Along the Road
+      map.addLayer({
+        id: 'traffic-lines-dash',
+        type: 'line',
+        source: 'traffic-corridor-lines',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#ffffff',
           'line-width': 2.5,
-          'line-dasharray': [3, 2],
-          'line-opacity': 0.9,
+          'line-dasharray': [2, 3],
+          'line-opacity': 0.75,
         },
       });
 
-      // ── 3D EXTRUDED BUILDINGS (OpenFreeMap Global Vector Buildings + Local M.G. Road High-Rises) ──
-      map.addSource('local-3d-buildings', {
-        type: 'geojson',
-        data: buildBengaluru3DBuildingsGeoJSON(),
+      // ── 4-Way Signal Indicators at the Road Stop Lines around J0 (M.G. Rd & Brigade Rd) ──
+      const signalArms = [
+        { arm: 'W', label: 'W (M.G. RD WEST)', lngLat: GOOGLE_ROAD_NODES.MG_METRO },
+        { arm: 'E', label: 'E (M.G. RD EAST)', lngLat: GOOGLE_ROAD_NODES.MG_CAUV_EAST },
+        { arm: 'S', label: 'S (BRIGADE RD)',   lngLat: GOOGLE_ROAD_NODES.BRIGADE_CHUR },
+        { arm: 'N', label: 'N (KAMARAJ RD)',   lngLat: GOOGLE_ROAD_NODES.KAMARAJ_S },
+      ];
+
+      signalArms.forEach((sig) => {
+        const el = document.createElement('div');
+        el.style.cssText = `
+          width:22px;height:22px;border-radius:50%;background:#ef4444;
+          border:2.5px solid #ffffff;box-shadow:0 0 12px #ef4444;
+          display:flex;align-items:center;justify-content:center;
+          font-family:monospace;font-size:10px;font-weight:900;color:#fff;
+        `;
+        el.innerText = sig.arm;
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat(sig.lngLat)
+          .addTo(map);
+        signalMarkersRef.current[sig.arm] = { marker, el };
       });
 
-      map.addLayer({
-        id: 'local-3d-buildings-layer',
-        type: 'fill-extrusion',
-        source: 'local-3d-buildings',
-        minzoom: 14.5,
-        paint: {
-          'fill-extrusion-color': ['get', 'color'],
-          'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-base': ['get', 'base'],
-          'fill-extrusion-opacity': 0.78,
-        },
+      // ── Case 03 Waypoint Badges on the Exact Real-Road Intersections ──
+      const wps = [
+        { id: 'WP1', label: 'WP1: KAMARAJ RD TURN',     lngLat: GOOGLE_ROAD_NODES.J0_BRIGADE, color: '#f59e0b' },
+        { id: 'WP2', label: 'WP2: CUBBON RD TURN',      lngLat: GOOGLE_ROAD_NODES.CUBBON_KAM, color: '#38bdf8' },
+        { id: 'WP3', label: 'WP3: CENTRAL ST TURN',     lngLat: GOOGLE_ROAD_NODES.CUBBON_CENT, color: '#38bdf8' },
+        { id: 'WP4', label: 'WP4: ANIL KUMBLE REJOIN',  lngLat: GOOGLE_ROAD_NODES.ANIL_KUMBLE, color: '#22c55e' },
+      ];
+
+      wps.forEach((wp) => {
+        const el = document.createElement('div');
+        el.style.cssText = `
+          background:rgba(2,6,23,0.92);color:${wp.color};border:1.5px solid ${wp.color};
+          padding:2px 7px;border-radius:5px;font-family:monospace;font-size:9px;font-weight:800;
+          white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.65);pointer-events:none;
+        `;
+        el.innerText = wp.label;
+        const m = new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -10] })
+          .setLngLat(wp.lngLat)
+          .addTo(map);
+        waypointMarkersRef.current.push({ marker: m, el });
       });
 
-      try {
-        map.addLayer({
-          id: 'openfreemap-3d-buildings',
-          type: 'fill-extrusion',
-          source: 'openfreemap',
-          'source-layer': 'building',
-          minzoom: 14.5,
-          paint: {
-            'fill-extrusion-color': [
-              'interpolate',
-              ['linear'],
-              ['coalesce', ['get', 'render_height'], ['get', 'height'], 16],
-              0, '#1e293b',
-              25, '#334155',
-              60, '#475569',
-            ],
-            'fill-extrusion-height': [
-              'coalesce',
-              ['get', 'render_height'],
-              ['get', 'height'],
-              18,
-            ],
-            'fill-extrusion-base': [
-              'coalesce',
-              ['get', 'render_min_height'],
-              ['get', 'min_height'],
-              0,
-            ],
-            'fill-extrusion-opacity': 0.75,
-          },
-        });
-      } catch (_) {}
+      // ── Create 2D Top-Down Ambulance Markers ──
+      const el1 = create2DAmbulanceElement('AMB-108 (M.G. ROAD)', '#22c55e', '#052e16');
+      amb1MarkerRef.current = new maplibregl.Marker({ element: el1, anchor: 'center' })
+        .setLngLat(GOOGLE_ROAD_NODES.ANIL_KUMBLE)
+        .addTo(map);
 
-      // ── TRUE 3D EXTRUDED VEHICLES SOURCE & LAYER (100% Locked to Road Centerlines in 3D) ──
-      map.addSource('vehicles-3d-source', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
+      const elA = create2DAmbulanceElement('AMB-A (BRIGADE RD)', '#3b82f6', '#172554');
+      ambAMarkerRef.current = new maplibregl.Marker({ element: elA, anchor: 'center' })
+        .setLngLat(GOOGLE_ROAD_NODES.BRIGADE_RES)
+        .addTo(map);
 
-      map.addLayer({
-        id: 'vehicles-3d-extrusion',
-        type: 'fill-extrusion',
-        source: 'vehicles-3d-source',
-        paint: {
-          'fill-extrusion-color': ['get', 'color'],
-          'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-base': ['get', 'base'],
-          'fill-extrusion-opacity': 0.96,
-        },
-      });
+      const elB = create2DAmbulanceElement('AMB-B (REROUTE)', '#f59e0b', '#451a03');
+      ambBMarkerRef.current = new maplibregl.Marker({ element: elB, anchor: 'center' })
+        .setLngLat(GOOGLE_ROAD_NODES.MG_CARIAPPA)
+        .addTo(map);
     });
 
     mapRef.current = map;
-
     return () => {
       map.remove();
       mapRef.current = null;
-      mapReadyRef.current = false;
     };
-  }, [syncMarkerRotationsWithMap]);
+  }, []);
 
-  // Switch between Google Hybrid, Google Pure Satellite, and Google Streets
+  // ── Switch Google Maps 2D Tile Layer (Streets / Hybrid / Pure Satellite) ──
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
-
-    if (map.getLayer('google-hybrid-layer')) {
-      map.setLayoutProperty(
-        'google-hybrid-layer',
-        'visibility',
-        mapTheme === 'GOOGLE_HYBRID' ? 'visible' : 'none'
-      );
-    }
-    if (map.getLayer('google-satellite-layer')) {
-      map.setLayoutProperty(
-        'google-satellite-layer',
-        'visibility',
-        mapTheme === 'GOOGLE_SATELLITE' ? 'visible' : 'none'
-      );
-    }
-    if (map.getLayer('google-roadmap-layer')) {
-      map.setLayoutProperty(
-        'google-roadmap-layer',
-        'visibility',
-        mapTheme === 'GOOGLE_STREETS' ? 'visible' : 'none'
-      );
-    }
-  }, [mapTheme]);
-
-  // Toggle 3D Extruded Buildings On/Off
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
-    const vis = buildings3DEnabled ? 'visible' : 'none';
-    if (map.getLayer('local-3d-buildings-layer')) {
-      map.setLayoutProperty('local-3d-buildings-layer', 'visibility', vis);
-    }
-    if (map.getLayer('openfreemap-3d-buildings')) {
-      map.setLayoutProperty('openfreemap-3d-buildings', 'visibility', vis);
-    }
-  }, [buildings3DEnabled]);
-
-  // Toggle Globe Projection On/Off
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
+    if (!map || !mapLoadedRef.current) return;
     try {
-      if (typeof map.setProjection === 'function') {
-        map.setProjection({ type: globeEnabled ? 'globe' : 'mercator' });
-      }
+      map.setLayoutProperty('google-streets-layer', 'visibility', mapStyleMode === 'STREETS' ? 'visible' : 'none');
+      map.setLayoutProperty('google-hybrid-layer', 'visibility', mapStyleMode === 'HYBRID' ? 'visible' : 'none');
+      map.setLayoutProperty('google-satellite-layer', 'visibility', mapStyleMode === 'SATELLITE' ? 'visible' : 'none');
     } catch (_) {}
-  }, [globeEnabled]);
+  }, [mapStyleMode]);
 
-  // Synchronize Road-Snapped Cars, Ambulances, 3D Extrusions, Signals & Waypoints on Every Tick
+  // ── Update 2D Traffic Lines, Signal Lights & Road-Snapped 2D Ambulances at 20Hz ──
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
+    if (!map || !mapLoadedRef.current) return;
 
-    // 1. Update Corridor & Detour Lines
-    const roadGeo = buildTwinRoadGeoJSON(
-      selectedCase,
-      Boolean(snapshot.ambulanceB?.detourActive || snapshot.isSimulationRunning)
-    );
-    map.getSource('twin-road-lines')?.setData(roadGeo.lines);
-
-    // 2. Update Road-Snapped Ambulances & BLE Preemption Domes
-    const bleFeatures = [];
-    const activeAmbUnits = [];
-
-    if (selectedCase === 1 && snapshot.ambulancePosition) {
-      const roadGeo1 = twinToRoadGeo(
-        snapshot.ambulancePosition.x,
-        snapshot.ambulancePosition.z,
-        { isAmbulance: true, ambId: 'AMB_1' }
-      );
-      const circle = createGeoCircle(roadGeo1.lngLat, 38);
-      circle.properties = { color: '#3b82f6' };
-      bleFeatures.push(circle);
-
-      activeAmbUnits.push({
-        id: 'AMB_1',
-        label: 'AMB-108 (M.G. ROAD)',
-        color: '#3b82f6',
-        lngLat: roadGeo1.lngLat,
-        bearing: roadGeo1.bearing,
-      });
-    } else if (selectedCase === 3) {
-      if (snapshot.ambulanceA?.position) {
-        const roadGeoA = twinToRoadGeo(
-          snapshot.ambulanceA.position.x,
-          snapshot.ambulanceA.position.z,
-          { isAmbulance: true, ambId: 'AMB_A' }
-        );
-        const circleA = createGeoCircle(roadGeoA.lngLat, 45);
-        circleA.properties = { color: '#3b82f6' };
-        bleFeatures.push(circleA);
-
-        activeAmbUnits.push({
-          id: 'AMB_A',
-          label: 'AMB-A (BRIGADE RD PRIORITY)',
-          color: '#3b82f6',
-          lngLat: roadGeoA.lngLat,
-          bearing: roadGeoA.bearing,
-        });
-      }
-      if (snapshot.ambulanceB?.position) {
-        const roadGeoB = twinToRoadGeo(
-          snapshot.ambulanceB.position.x,
-          snapshot.ambulanceB.position.z,
-          {
-            isAmbulance: true,
-            ambId: 'AMB_B',
-            wpIdx: snapshot.ambulanceB.currentWaypointIdx || 0,
-          }
-        );
-        const circleB = createGeoCircle(roadGeoB.lngLat, 35);
-        circleB.properties = { color: '#f59e0b' };
-        bleFeatures.push(circleB);
-
-        activeAmbUnits.push({
-          id: 'AMB_B',
-          label: 'AMB-B (CUBBON RD DETOUR)',
-          color: '#f59e0b',
-          lngLat: roadGeoB.lngLat,
-          bearing: roadGeoB.bearing,
-        });
-      }
+    // 1. Update Dynamic Red-to-Green Traffic Corridor Lines on the Roads
+    const trafficSrc = map.getSource('traffic-corridor-lines');
+    if (trafficSrc) {
+      trafficSrc.setData(buildRoadTrafficLinesGeoJSON(state));
     }
 
-    map.getSource('ble-dome-source')?.setData({
-      type: 'FeatureCollection',
-      features: bleFeatures,
+    // 2. Show/Hide Case 03 Waypoint Badges
+    waypointMarkersRef.current.forEach(({ el }) => {
+      el.style.display = state.selectedCase === 3 ? 'block' : 'none';
     });
 
-    // 3. Update True 3D Extruded Vehicles Layer
-    const vehicles = snapshot.vehicles || [];
-    map.getSource('vehicles-3d-source')?.setData(
-      build3DVehiclesGeoJSON(vehicles, activeAmbUnits, selectedCase)
-    );
-
-    // 4. Render 4-Way Signal Badges around M.G. Road & Brigade/Kamaraj Junction (J0)
-    const poleConfigs = [
-      { id: 'NORTH_ARM', label: 'N', coord: twinToRoadGeo(0, -14, { carType: 'S' }).lngLat, green: signals.sGreen, yellow: signals.sYellow },
-      { id: 'SOUTH_ARM', label: 'S', coord: twinToRoadGeo(0, 14,  { carType: 'N' }).lngLat, green: signals.nGreen, yellow: signals.nYellow },
-      { id: 'EAST_ARM',  label: 'E', coord: twinToRoadGeo(12, 0,  { carType: 'W' }).lngLat, green: signals.wGreen, yellow: signals.wYellow },
-      { id: 'WEST_ARM',  label: 'W', coord: twinToRoadGeo(-12, 0, { carType: 'E' }).lngLat, green: signals.eGreen, yellow: signals.eYellow },
-    ];
-
-    poleConfigs.forEach((pole) => {
-      const color = pole.green ? '#22c55e' : pole.yellow ? '#facc15' : '#ef4444';
-      let marker = signalMarkersRef.current.get(pole.id);
-      if (!marker) {
-        const el = document.createElement('div');
-        el.style.pointerEvents = 'none';
-        marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-          .setLngLat(pole.coord)
-          .addTo(map);
-        signalMarkersRef.current.set(pole.id, marker);
-      } else {
-        marker.setLngLat(pole.coord);
-      }
-
-      marker.getElement().innerHTML = `
-        <div style="
-          background: rgba(2, 6, 23, 0.92);
-          border: 1.5px solid ${color};
-          box-shadow: 0 0 8px ${color};
-          color: #fff;
-          padding: 1px 5px;
-          border-radius: 999px;
-          font-family: monospace;
-          font-size: 8px;
-          font-weight: 900;
-          display: flex;
-          align-items: center;
-          gap: 3px;
-        ">
-          <span style="width: 6px; height: 6px; border-radius: 50%; background: ${color}; display: inline-block;"></span>
-          <span>${pole.label}</span>
-        </div>
-      `;
-    });
-
-    // 5. Render Case 03 Real Google Maps Waypoint Beacons (WP1..WP4)
-    const waypoints = [
-      { id: 'WP1', label: 'WP1: East Detour Turn',   coord: GOOGLE_ROAD_NODES.WP1, idx: 1 },
-      { id: 'WP2', label: 'WP2: Cubbon Rd Turn',     coord: GOOGLE_ROAD_NODES.WP2, idx: 2 },
-      { id: 'WP3', label: 'WP3: Anil Kumble Turn',   coord: GOOGLE_ROAD_NODES.WP3, idx: 3 },
-      { id: 'WP4', label: 'WP4: M.G. Rd Rejoin',     coord: GOOGLE_ROAD_NODES.WP4, idx: 4 },
-    ];
-
-    waypoints.forEach((wp) => {
-      let marker = wpMarkersRef.current.get(wp.id);
-      if (selectedCase !== 3) {
-        if (marker) {
-          marker.remove();
-          wpMarkersRef.current.delete(wp.id);
-        }
-        return;
-      }
-
-      const curWp = snapshot.ambulanceB?.currentWaypointIdx || 0;
-      const isDone = curWp >= wp.idx;
-      const isNext = curWp + 1 === wp.idx;
-      const borderCol = isDone ? '#22c55e' : isNext ? '#f59e0b' : '#00f5ff';
-
-      if (!marker) {
-        const el = document.createElement('div');
-        el.style.pointerEvents = 'none';
-        marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
-          .setLngLat(wp.coord)
-          .addTo(map);
-        wpMarkersRef.current.set(wp.id, marker);
-      } else {
-        marker.setLngLat(wp.coord);
-      }
-
-      marker.getElement().innerHTML = `
-        <div style="
-          background: rgba(2, 6, 23, 0.92);
-          border: 1.5px solid ${borderCol};
-          color: ${borderCol};
-          padding: 2px 6px;
-          border-radius: 5px;
-          font-family: monospace;
-          font-size: 9px;
-          font-weight: 900;
-          box-shadow: 0 0 10px ${borderCol}66;
-          white-space: nowrap;
-        ">
-          ${isDone ? '✓ ' : '◈ '}${wp.label}
-        </div>
-      `;
-    });
-
-    // 6. Render Camera-Bearing-Compensated Vehicle Roof Markers & Yield Badges
-    const activeCarIds = new Set();
-    const mapBrg = map.getBearing() || 0;
-
-    vehicles.forEach((veh) => {
-      activeCarIds.add(veh.id);
-      const snapped = twinToRoadGeo(veh.x, veh.z, {
-        carType: veh.type,
-        rotY: veh.rotY,
-        isAmbulance: false,
-      });
-
-      carBearingsRef.current.set(veh.id, snapped.bearing);
-      const screenDeg = (snapped.bearing - mapBrg + 360) % 360;
-
-      const isYielding = veh.state === 'YIELDING' || veh.state === 'HOLDING';
-      const isMoving = veh.speed > 0.4;
-      const isEastBlockade = selectedCase === 3 && veh.type === 'W' && veh.x >= 10 && veh.x <= 44;
-
-      const bodyColor = isYielding
-        ? '#f59e0b'
-        : isEastBlockade
-        ? '#ef4444'
-        : veh.receivesBLE
-        ? '#10b981'
-        : isMoving
-        ? '#38bdf8'
-        : '#e2e8f0';
-
-      let marker = carMarkersRef.current.get(veh.id);
-      if (!marker) {
-        const el = document.createElement('div');
-        el.style.pointerEvents = 'none';
-        marker = new maplibregl.Marker({
-          element: el,
-          anchor: 'center',
-        })
-          .setLngLat(snapped.lngLat)
-          .addTo(map);
-        carMarkersRef.current.set(veh.id, marker);
-      } else {
-        marker.setLngLat(snapped.lngLat);
-      }
-
-      const badgeHtml = isYielding
-        ? `<div style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:#f59e0b;color:#000;font-family:monospace;font-size:7px;font-weight:900;padding:0.5px 3px;border-radius:2px;white-space:nowrap;z-index:20;">YIELD</div>`
-        : '';
-
-      marker.getElement().innerHTML = `
-        <div style="position:relative;width:14px;height:24px;display:flex;align-items:center;justify-content:center;">
-          ${badgeHtml}
-          <div class="semtos-car-rot" style="transform:rotate(${screenDeg.toFixed(1)}deg);display:flex;align-items:center;justify-content:center;">
-            <svg width="14" height="24" viewBox="0 0 16 28" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.9));">
-              <rect x="2" y="2" width="12" height="24" rx="4" fill="${bodyColor}" stroke="#020617" stroke-width="1.5"/>
-              <rect x="3.5" y="6" width="9" height="6" rx="1.5" fill="#0f172a"/>
-              <rect x="4" y="17" width="8" height="4" rx="1" fill="#1e293b"/>
-              <circle cx="4.5" cy="3" r="1.4" fill="#fef08a"/>
-              <circle cx="11.5" cy="3" r="1.4" fill="#fef08a"/>
-            </svg>
-          </div>
-        </div>
-      `;
-    });
-
-    for (const [id, marker] of carMarkersRef.current.entries()) {
-      if (!activeCarIds.has(id)) {
-        marker.remove();
-        carMarkersRef.current.delete(id);
-        carBearingsRef.current.delete(id);
-      }
-    }
-
-    // 7. Render Active Ambulance Callout Markers on Road
-    const activeAmbIds = new Set();
-    activeAmbUnits.forEach((u) => {
-      activeAmbIds.add(u.id);
-      const lngLat = liveGpsActive && userGpsCoord ? userGpsCoord : u.lngLat;
-      const ambScreenDeg = (u.bearing - mapBrg + 360) % 360;
-
-      let marker = ambMarkersRef.current.get(u.id);
-      if (!marker) {
-        const el = document.createElement('div');
-        el.style.zIndex = '60';
-        marker = new maplibregl.Marker({
-          element: el,
-          anchor: 'center',
-        })
-          .setLngLat(lngLat)
-          .addTo(map);
-        ambMarkersRef.current.set(u.id, marker);
-      } else {
-        marker.setLngLat(lngLat);
-      }
-
-      marker.getElement().innerHTML = `
-        <div style="position:relative;display:flex;flex-direction:column;align-items:center;pointer-events:none;">
-          <div style="
-            background: rgba(2, 6, 23, 0.95);
-            border: 1.5px solid ${u.color};
-            color: #fff;
-            font-family: monospace;
-            font-size: 9px;
-            font-weight: 900;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-bottom: 3px;
-            white-space: nowrap;
-            box-shadow: 0 0 12px ${u.color};
-          ">
-            🚑 ${u.label}
-          </div>
-          <div style="
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            background: ${u.color};
-            border: 2.5px solid #ffffff;
-            box-shadow: 0 0 20px ${u.color};
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transform: rotate(${ambScreenDeg.toFixed(1)}deg);
-          ">
-            <span style="color:#fff;font-size:13px;font-weight:900;line-height:1;">▲</span>
-          </div>
-        </div>
-      `;
-    });
-
-    for (const [id, marker] of ambMarkersRef.current.entries()) {
-      if (!activeAmbIds.has(id)) {
-        marker.remove();
-        ambMarkersRef.current.delete(id);
-      }
-    }
-
-    // 8. Camera Tracking Modes
-    if (cameraLock === 'FOLLOW') {
-      const targetUnit =
-        selectedCase === 1
-          ? activeAmbUnits[0]
-          : activeAmbUnits.find((a) => a.id === activeUnit) || activeAmbUnits[0];
-
-      if (targetUnit) {
-        map.easeTo({
-          center: liveGpsActive && userGpsCoord ? userGpsCoord : targetUnit.lngLat,
-          zoom: 17.8,
-          pitch: 60,
-          bearing: targetUnit.bearing,
-          duration: 180,
-          easing: (t) => t,
-        });
-      }
-    } else if (cameraLock === 'JUNCTION') {
-      map.easeTo({
-        center: [ORIGIN_LNG, ORIGIN_LAT],
-        zoom: 17.5,
-        pitch: 58,
-        bearing: -25,
-        duration: 450,
-      });
-    } else if (cameraLock === 'DETOUR_OVERVIEW') {
-      map.easeTo({
-        center: [77.6074, 12.9760],
-        zoom: 16.4,
-        pitch: 50,
-        bearing: -15,
-        duration: 450,
-      });
-    }
-  }, [snapshot, selectedCase, activeUnit, cameraLock, signals, liveGpsActive, userGpsCoord]);
-
-  // Telemetry Calculations
-  const telemetry = useMemo(() => {
-    const vehicles = snapshot.vehicles || [];
-    const yieldingCount = vehicles.filter(
-      (v) => v.state === 'YIELDING' || v.state === 'HOLDING' || v.receivesBLE
-    ).length;
-
-    if (selectedCase === 1) {
-      const x = snapshot.ambulancePosition?.x ?? -120;
-      const dist = Math.max(0, Math.round(Math.abs(x)));
-      return {
-        unitName: 'AMB-108 (M.G. Road Corridor)',
-        distToJunction: dist,
-        yieldingCount,
-        status: snapshot.isPreempted
-          ? 'GREEN WAVE ACTIVE (M.G. ROAD)'
-          : snapshot.isSimulationRunning
-          ? 'EN ROUTE ON M.G. ROAD'
-          : 'STANDBY AT ANIL KUMBLE CIRCLE',
-        navInstruction:
-          x < -15
-            ? 'Approaching M.G. Road & Brigade Rd Signal'
-            : x <= 15
-            ? 'Crossing Brigade Rd Junction — Green Preempted'
-            : 'Cleared Junction — Proceeding to Mayo Hall',
-        subInstruction: `Twin X: ${x.toFixed(1)}m | Z: ${(snapshot.ambulancePosition?.z ?? -6).toFixed(1)}m`,
-      };
-    }
-
-    if (activeUnit === 'AMB_A') {
-      const z = snapshot.ambulanceA?.position?.z ?? 90;
-      return {
-        unitName: 'Ambulance A (Cardiac — Brigade Rd South)',
-        distToJunction: Math.max(0, Math.round(z)),
-        yieldingCount,
-        status: snapshot.ambulanceA?.status || 'STANDBY',
-        navInstruction:
-          z > 12
-            ? 'Proceed North on Brigade Road -> Green Wave Locked'
-            : 'Cleared M.G. Road Junction -> Continuing onto Kamaraj Road',
-        subInstruction: `Twin X: 2.2m | Z: ${z.toFixed(1)}m`,
-      };
-    }
-
-    const posB = snapshot.ambulanceB?.position || { x: 90, z: -2.89 };
-    const wpIdx = snapshot.ambulanceB?.currentWaypointIdx || 0;
-    const distB = Math.round(Math.hypot(posB.x, posB.z));
-
-    const wpDirectives = [
-      'Leg 1: M.G. Rd Westbound -> Turn Right at WP1 (East Detour)',
-      'Leg 2: North Bypass -> Proceed North to WP2 (Cubbon Rd)',
-      'Leg 3: Cubbon Road Westbound -> Proceed to WP3 (Anil Kumble Turn)',
-      'Leg 4: St. Marks / Anil Kumble Connector -> Proceed South to WP4',
-      'Leg 5: Rejoined M.G. Road Westbound -> Clear of Gridlock',
-    ];
-
-    return {
-      unitName: 'Ambulance B (Trauma — Cubbon Rd Macro-Detour)',
-      distToJunction: distB,
-      yieldingCount,
-      status: snapshot.deadlockDetected ? 'CUBBON RD DETOUR ACTIVE' : snapshot.ambulanceB?.status || 'STANDBY',
-      navInstruction: wpDirectives[Math.min(wpIdx, wpDirectives.length - 1)],
-      subInstruction: `Twin X: ${posB.x.toFixed(1)}m | Z: ${posB.z.toFixed(1)}m`,
+    // 3. Update 4-Way Signal Indicators
+    const sig = state.signals || {};
+    const armStates = {
+      N: { green: sig.sGreen, yellow: sig.sYellow },
+      S: { green: sig.nGreen, yellow: sig.nYellow },
+      E: { green: sig.wGreen, yellow: sig.wYellow },
+      W: { green: sig.eGreen, yellow: sig.eYellow },
     };
-  }, [snapshot, selectedCase, activeUnit]);
+
+    Object.entries(armStates).forEach(([arm, st]) => {
+      const item = signalMarkersRef.current[arm];
+      if (!item) return;
+      const col = st.green ? '#22c55e' : st.yellow ? '#facc15' : '#ef4444';
+      item.el.style.background = col;
+      item.el.style.boxShadow = `0 0 14px ${col}`;
+    });
+
+    // 4. Update 2D Ambulance Positions & Exact Road Bearing Rotation
+    const set2DRotation = (markerRef, bearingDeg) => {
+      const el = markerRef.current?.getElement();
+      const rotor = el?.querySelector('.amb-2d-rotor');
+      if (rotor) {
+        rotor.style.transform = `rotate(${bearingDeg}deg)`;
+      }
+    };
+
+    if (state.selectedCase === 1) {
+      amb1MarkerRef.current.getElement().style.display = 'flex';
+      ambAMarkerRef.current.getElement().style.display = 'none';
+      ambBMarkerRef.current.getElement().style.display = 'none';
+
+      const lngLat1 = state.case1?.ambulanceLngLat || GOOGLE_ROAD_NODES.ANIL_KUMBLE;
+      const bearing1 = state.case1?.ambulanceBearing ?? 104;
+      amb1MarkerRef.current.setLngLat(lngLat1);
+      set2DRotation(amb1MarkerRef, bearing1);
+
+      if (cameraMode === 'FOLLOW') {
+        map.easeTo({ center: lngLat1, zoom: 16.4, pitch: 0, bearing: 0, duration: 120 });
+      }
+    } else {
+      amb1MarkerRef.current.getElement().style.display = 'none';
+      ambAMarkerRef.current.getElement().style.display = 'flex';
+      ambBMarkerRef.current.getElement().style.display = 'flex';
+
+      const lngLatA = state.case3?.ambulanceA?.lngLat || GOOGLE_ROAD_NODES.BRIGADE_RES;
+      const bearingA = state.case3?.ambulanceA?.bearing ?? 15;
+      const lngLatB = state.case3?.ambulanceB?.lngLat || GOOGLE_ROAD_NODES.MG_CARIAPPA;
+      const bearingB = state.case3?.ambulanceB?.bearing ?? 285;
+
+      ambAMarkerRef.current.setLngLat(lngLatA);
+      set2DRotation(ambAMarkerRef, bearingA);
+
+      ambBMarkerRef.current.setLngLat(lngLatB);
+      set2DRotation(ambBMarkerRef, bearingB);
+
+      if (cameraMode === 'FOLLOW') {
+        const target = activeUnit === 'AMB_A' ? lngLatA : lngLatB;
+        map.easeTo({ center: target, zoom: 16.3, pitch: 0, bearing: 0, duration: 120 });
+      }
+    }
+  }, [state, activeUnit, cameraMode]);
+
+  const setViewPreset = (mode) => {
+    setCameraMode(mode);
+    const map = mapRef.current;
+    if (!map) return;
+    if (mode === 'JUNCTION') {
+      map.flyTo({ center: [ORIGIN_LNG, ORIGIN_LAT], zoom: 16.8, pitch: 0, bearing: 0, duration: 700 });
+    } else if (mode === 'OVERVIEW') {
+      map.flyTo({ center: [77.6062, 12.9762], zoom: 15.6, pitch: 0, bearing: 0, duration: 700 });
+    }
+  };
+
+  const isCase1 = state.selectedCase === 1;
+  const activeTelemetry = isCase1
+    ? {
+        name: 'AMB-108 (M.G. Road Priority)',
+        status: state.signals?.isPreempted
+          ? 'GREEN CORRIDOR ACTIVE'
+          : state.case1?.isSimulationRunning
+          ? 'APPROACHING RED TRAFFIC LINE'
+          : 'STANDBY AT ANIL KUMBLE CIRCLE',
+        dist: state.case1?.distanceToJunction ?? 120,
+        instruction:
+          state.case1?.distanceToJunction > 85
+            ? 'Red Traffic Line Ahead on M.G. Road — Approaching Preemption Zone'
+            : state.case1?.distanceToJunction > 0
+            ? 'Signal Preempted! Red Traffic Line Turned GREEN on M.G. Road'
+            : 'Junction Cleared — Sequential Traffic Release Active',
+        color: state.signals?.isPreempted ? '#22c55e' : '#38bdf8',
+      }
+    : activeUnit === 'AMB_A'
+    ? {
+        name: 'Ambulance A (Brigade Rd -> Kamaraj Rd)',
+        status: state.case3?.ambulanceA?.status || 'IDLE_STANDBY',
+        dist: Math.round(state.case3?.ambulanceA?.distanceToJunction ?? 90),
+        instruction: 'Proceed Straight North on Brigade Rd -> Kamaraj Rd Green Corridor',
+        color: '#3b82f6',
+      }
+    : {
+        name: 'Ambulance B (Kamaraj -> Cubbon -> Anil Kumble Detour)',
+        status: state.case3?.ambulanceB?.status || 'IDLE_STANDBY',
+        dist: Math.round(
+          Math.hypot(
+            state.case3?.ambulanceB?.position?.x || 0,
+            state.case3?.ambulanceB?.position?.z || 0
+          )
+        ),
+        instruction: state.case3?.ambulanceB?.waypointName || 'Awaiting Dispatch on M.G. Road East',
+        color: '#f59e0b',
+      };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-slate-950 text-white select-none font-sans">
-      {/* FULL-SCREEN GOOGLE MAPS SATELLITE + 3D BUILDINGS VIEWPORT */}
-      <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
+    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: '#020617', fontFamily: 'monospace', color: '#f8fafc' }}>
+      <style>{`
+        @keyframes ambPulse2D {
+          0% { transform: scale(0.75); opacity: 0.95; }
+          100% { transform: scale(1.85); opacity: 0; }
+        }
+      `}</style>
 
-      {/* TOP NAVIGATION & CASE BAR */}
-      <div className="absolute top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        <div className="flex items-center gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-800 px-3.5 py-2 rounded-xl pointer-events-auto shadow-2xl">
-          <a
-            href="/"
-            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[11px] font-mono text-slate-300 transition"
-          >
+      {/* Fullscreen 2D Google Map Container */}
+      <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
+
+      {/* Top Navigation & Case Switcher Bar */}
+      <div style={{
+        position: 'fixed', top: 16, left: 16, right: 16, zIndex: 30,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10,
+        background: 'rgba(2, 6, 23, 0.92)', border: '1.5px solid #334155', borderRadius: 12,
+        padding: '10px 16px', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.65)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <a href="/" style={{ background: '#1e293b', color: '#cbd5e1', border: '1px solid #475569', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 800, textDecoration: 'none' }}>
             ← 3D TWIN CMD
           </a>
-          <div className="h-4 w-[1px] bg-slate-800 mx-1" />
           <div>
-            <div className="text-xs font-black tracking-wider text-emerald-400 font-mono flex items-center gap-2">
-              <span>🛰️ SEMTOS GOOGLE MAPS 3D SATELLITE COCKPIT</span>
-              <span
-                className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                  isLiveTwinConnected
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                }`}
-              >
-                {isLiveTwinConnected
-                  ? `● LIVE 1:1 SYNC (${snapshot.vehicles?.length || 0} CARS)`
-                  : `● ROAD-SNAPPED 3D SIMULATOR (${snapshot.vehicles?.length || 0} CARS)`}
-              </span>
+            <div style={{ fontSize: 13, fontWeight: 900, color: '#22c55e', letterSpacing: 1.5 }}>
+              🚑 SEMTOS 2D GOOGLE MAPS CORRIDOR COCKPIT
+            </div>
+            <div style={{ fontSize: 10, color: state.isStandaloneFallback ? '#38bdf8' : '#22c55e' }}>
+              {state.isStandaloneFallback
+                ? '● STANDALONE 2D ROAD-SNAPPED SIMULATOR (RED -> GREEN TRAFFIC LINES)'
+                : '● LIVE 20Hz SYNC WITH 3D TWIN COMMAND CENTER'}
             </div>
           </div>
         </div>
 
-        {/* CASE & UNIT SWITCHERS */}
-        <div className="flex items-center gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-800 p-1.5 rounded-xl pointer-events-auto shadow-2xl">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button
-            onClick={() => sendCommand('SET_CASE', { caseNumber: 1 })}
-            className={`px-3 py-1.5 rounded-lg font-mono text-xs font-bold transition ${
-              selectedCase === 1
-                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30'
-                : 'text-slate-400 hover:text-white bg-slate-900'
-            }`}
+            onClick={() => sendCommand('SWITCH_CASE', { caseId: 1 })}
+            style={{
+              background: isCase1 ? '#22c55e' : '#0f172a',
+              color: isCase1 ? '#000' : '#94a3b8',
+              border: '1.5px solid #22c55e', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 900, cursor: 'pointer'
+            }}
           >
-            CASE 01 (M.G. RD PREEMPTION)
+            CASE 01 (M.G. ROAD PREEMPTION)
           </button>
           <button
-            onClick={() => sendCommand('SET_CASE', { caseNumber: 3 })}
-            className={`px-3 py-1.5 rounded-lg font-mono text-xs font-bold transition ${
-              selectedCase === 3
-                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30'
-                : 'text-slate-400 hover:text-white bg-slate-900'
-            }`}
+            onClick={() => sendCommand('SWITCH_CASE', { caseId: 3 })}
+            style={{
+              background: !isCase1 ? '#f59e0b' : '#0f172a',
+              color: !isCase1 ? '#000' : '#94a3b8',
+              border: '1.5px solid #f59e0b', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 900, cursor: 'pointer'
+            }}
           >
-            CASE 03 (DUAL AMB & CUBBON RD DETOUR)
+            CASE 03 (DUAL AMB & KAMARAJ–CUBBON DETOUR)
           </button>
 
-          {selectedCase === 3 && (
-            <div className="flex items-center gap-1 ml-1 pl-2 border-l border-slate-800">
+          {!isCase1 && (
+            <div style={{ display: 'flex', background: '#0f172a', padding: 3, borderRadius: 8, border: '1px solid #334155', gap: 4 }}>
               <button
                 onClick={() => setActiveUnit('AMB_B')}
-                className={`px-2.5 py-1 rounded-md font-mono text-[11px] font-bold transition ${
-                  activeUnit === 'AMB_B'
-                    ? 'bg-amber-400 text-slate-950'
-                    : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
+                style={{
+                  background: activeUnit === 'AMB_B' ? '#f59e0b' : 'transparent',
+                  color: activeUnit === 'AMB_B' ? '#000' : '#94a3b8',
+                  border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 10, fontWeight: 900, cursor: 'pointer'
+                }}
               >
-                🚑 AMB B (CUBBON RD)
+                🚑 AMB B (DETOUR)
               </button>
               <button
                 onClick={() => setActiveUnit('AMB_A')}
-                className={`px-2.5 py-1 rounded-md font-mono text-[11px] font-bold transition ${
-                  activeUnit === 'AMB_A'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
+                style={{
+                  background: activeUnit === 'AMB_A' ? '#3b82f6' : 'transparent',
+                  color: activeUnit === 'AMB_A' ? '#fff' : '#94a3b8',
+                  border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 10, fontWeight: 900, cursor: 'pointer'
+                }}
               >
                 🚑 AMB A (BRIGADE RD)
               </button>
             </div>
           )}
 
-          <a
-            href="/driver"
-            target="_blank"
-            rel="noreferrer"
-            className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-xs font-bold transition"
-          >
+          <a href="/driver" target="_blank" rel="noopener noreferrer" style={{
+            background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid #f59e0b',
+            borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 800, textDecoration: 'none'
+          }}>
             📱 OPEN PHONE HUD
           </a>
         </div>
       </div>
 
-      {/* TURN-BY-TURN NAVIGATION BANNER */}
-      <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 w-full max-w-xl px-4 pointer-events-none">
-        <div
-          className={`backdrop-blur-md border-2 rounded-2xl px-5 py-3 shadow-2xl transition-all ${
-            snapshot.deadlockDetected
-              ? 'bg-amber-950/90 border-amber-400 shadow-amber-500/20'
-              : snapshot.isPreempted
-              ? 'bg-emerald-950/90 border-emerald-400 shadow-emerald-500/20'
-              : 'bg-slate-950/90 border-slate-700'
-          }`}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400">
-                GOOGLE MAPS ROAD-SNAPPED 3D NAVIGATION • {telemetry.unitName}
-              </div>
-              <div className="text-base font-black tracking-wide text-white mt-0.5">
-                {telemetry.navInstruction}
-              </div>
-            </div>
-            <div className="text-right font-mono">
-              <div className="text-xl font-black text-emerald-400">{telemetry.distToJunction}m</div>
-              <div className="text-[9px] text-slate-400 uppercase">TO SIGNAL</div>
-            </div>
-          </div>
+      {/* Top-Center Turn-by-Turn Navigation Banner */}
+      <div style={{
+        position: 'fixed', top: 82, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
+        background: 'rgba(2, 6, 23, 0.94)', border: `2px solid ${activeTelemetry.color}`,
+        borderRadius: 14, padding: '12px 24px', minWidth: 440, textAlign: 'center',
+        boxShadow: `0 0 28px ${activeTelemetry.color}44`, backdropFilter: 'blur(12px)'
+      }}>
+        <div style={{ fontSize: 10, color: '#94a3b8', letterSpacing: 2, marginBottom: 4 }}>
+          2D ROAD-SNAPPED NAVIGATION • {activeTelemetry.name}
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 900, color: '#f8fafc', letterSpacing: 0.6 }}>
+          {activeTelemetry.instruction}
         </div>
       </div>
 
-      {/* LEFT TELEMETRY & CONTROLS PANEL */}
-      <div className="absolute top-36 left-3 z-20 w-72 bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-2xl p-4 shadow-2xl space-y-3">
+      {/* Left Cockpit Telemetry & Dispatch Control Panel */}
+      <div style={{
+        position: 'fixed', top: 165, left: 16, zIndex: 25, width: 325,
+        background: 'rgba(2, 6, 23, 0.93)', border: '1.5px solid #334155', borderRadius: 14,
+        padding: 16, backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
+        display: 'flex', flexDirection: 'column', gap: 12
+      }}>
         <button
           onClick={() => sendCommand('DISPATCH')}
-          className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-mono font-black text-xs tracking-wider shadow-lg shadow-emerald-500/25 transition"
+          style={{
+            width: '100%', padding: '11px 0', borderRadius: 10, fontWeight: 900, fontSize: 12,
+            letterSpacing: 1.4, cursor: 'pointer', border: '1px solid #22c55e',
+            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', color: '#020617',
+            boxShadow: '0 0 20px rgba(34, 197, 94, 0.45)'
+          }}
         >
           ▶ DISPATCH AMBULANCE [ENTER]
         </button>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5">
-            <div className="text-[10px] font-mono text-slate-400">DIST TO JUNCTION</div>
-            <div className="text-lg font-black font-mono text-sky-400 mt-0.5">
-              {telemetry.distToJunction} m
-            </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 9, color: '#64748b' }}>DIST TO SIGNAL</div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#38bdf8' }}>{activeTelemetry.dist} m</div>
           </div>
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5">
-            <div className="text-[10px] font-mono text-slate-400">CARS YIELDING (BLE)</div>
-            <div className="text-lg font-black font-mono text-amber-400 mt-0.5">
-              {telemetry.yieldingCount} cars
+          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 9, color: '#64748b' }}>ROAD LINE STATUS</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: state.signals?.isPreempted ? '#22c55e' : '#ef4444', marginTop: 4 }}>
+              {state.signals?.isPreempted ? '🟢 GREEN WAVE' : '🔴 RED TRAFFIC'}
             </div>
           </div>
         </div>
 
-        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 font-mono text-xs space-y-1">
-          <div className="text-[10px] text-slate-400">ROAD-SNAPPED 3D TELEMETRY</div>
-          <div className="text-slate-200 font-bold">{telemetry.subInstruction}</div>
-          <div className="text-[10px] text-emerald-400 font-bold">{telemetry.status}</div>
-        </div>
-
-        {/* 4-WAY SIGNAL STATUS */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5">
-          <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-2">
-            <span>M.G. & BRIGADE/KAMARAJ SIGNALS</span>
-            <span className="text-sky-400 font-bold">{snapshot.signalPhase || 'IDLE'}</span>
+        {/* 4-Way Signal Matrix */}
+        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginBottom: 8 }}>
+            <span>M.G. & BRIGADE RD SIGNALS</span>
+            <strong style={{ color: '#38bdf8' }}>{state.signals?.signalPhase}</strong>
           </div>
-          <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11 }}>
             {[
-              { label: 'NORTH (KAMARAJ)', green: signals.sGreen, yellow: signals.sYellow },
-              { label: 'SOUTH (BRIGADE)', green: signals.nGreen, yellow: signals.nYellow },
-              { label: 'EAST (M.G. RD)',  green: signals.wGreen, yellow: signals.wYellow },
-              { label: 'WEST (M.G. RD)',  green: signals.eGreen, yellow: signals.eYellow },
-            ].map((s) => (
-              <div
-                key={s.label}
-                className="flex items-center gap-2 bg-slate-950/80 px-2 py-1 rounded border border-slate-800"
-              >
-                <span
-                  className={`w-2.5 h-2.5 rounded-full ${
-                    s.green
-                      ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
-                      : s.yellow
-                      ? 'bg-yellow-400'
-                      : 'bg-red-500'
-                  }`}
-                />
-                <span className="text-[9px] text-slate-300 font-bold">{s.label}</span>
+              { label: 'NORTH (KAMARAJ)', green: state.signals?.sGreen, yellow: state.signals?.sYellow },
+              { label: 'SOUTH (BRIGADE)', green: state.signals?.nGreen, yellow: state.signals?.nYellow },
+              { label: 'EAST (M.G. RD)',  green: state.signals?.wGreen, yellow: state.signals?.wYellow },
+              { label: 'WEST (M.G. RD)',  green: state.signals?.eGreen, yellow: state.signals?.eYellow },
+            ].map((a) => (
+              <div key={a.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>{a.green ? '🟢' : a.yellow ? '🟡' : '🔴'}</span>
+                <span style={{ color: '#cbd5e1', fontWeight: 700, fontSize: 10 }}>{a.label}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* CASE 3 5-LEG WAYPOINT CHECKLIST */}
-        {selectedCase === 3 && (
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 space-y-1">
-            <div className="text-[10px] font-mono text-cyan-400 font-bold">
-              AMB B CUBBON RD DETOUR WAYPOINTS
+        {/* Case 03 5-Leg Real-Road Detour Progress */}
+        {!isCase1 && (
+          <div style={{ background: '#0f172a', border: '1px solid #f59e0b55', borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 9, color: '#f59e0b', fontWeight: 800, marginBottom: 6 }}>
+              AMB-B REAL-ROAD DETOUR (KAMARAJ → CUBBON → ANIL KUMBLE)
             </div>
-            {[
-              { idx: 1, name: 'WP1: East Detour Turn (X:47)' },
-              { idx: 2, name: 'WP2: Cubbon Rd Turn (Z:-60)' },
-              { idx: 3, name: 'WP3: Anil Kumble Turn (X:-87)' },
-              { idx: 4, name: 'WP4: M.G. Rd Rejoin (Z:-2.89)' },
-            ].map((w) => {
-              const cur = snapshot.ambulanceB?.currentWaypointIdx || 0;
-              const done = cur >= w.idx;
-              const active = cur + 1 === w.idx && snapshot.isSimulationRunning;
-              return (
-                <div
-                  key={w.idx}
-                  className={`text-[10px] font-mono px-2 py-1 rounded flex items-center justify-between ${
-                    done
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                      : active
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                      : 'bg-slate-950/60 text-slate-500'
-                  }`}
-                >
-                  <span>{w.name}</span>
-                  <span>{done ? '✓' : active ? '→' : '•'}</span>
-                </div>
-              );
-            })}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              {[
+                { id: 1, label: 'WP1: Kamaraj Rd' },
+                { id: 2, label: 'WP2: Cubbon Rd' },
+                { id: 3, label: 'WP3: Central St' },
+                { id: 4, label: 'WP4: Anil Kumble' },
+              ].map((wp) => {
+                const cur = state.case3?.ambulanceB?.currentWaypointIdx ?? 0;
+                const done = cur > wp.id;
+                const active = cur === wp.id;
+                return (
+                  <div key={wp.id} style={{
+                    padding: '4px 6px', borderRadius: 6, fontSize: 9, fontWeight: 800, textAlign: 'center',
+                    background: done ? '#22c55e' : active ? '#f59e0b' : '#1e293b',
+                    color: done || active ? '#000' : '#64748b'
+                  }}>
+                    {wp.label}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* VEHICLE LEGEND */}
-        <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono text-slate-400 pt-1">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-sky-400 inline-block" /> Moving 3D Car
+        {/* Legend */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 10, color: '#cbd5e1', borderTop: '1px solid #1e293b', paddingTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 22, height: 5, borderRadius: 3, background: '#ef4444', display: 'inline-block', boxShadow: '0 0 8px #ef4444' }} />
+            <span>Red Road Line = Traffic Queue / Red Signal</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block" /> BLE Yielding Car
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-slate-200 inline-block" /> Red Queue Car
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block" /> East Gridlock Jam
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 22, height: 5, borderRadius: 3, background: '#22c55e', display: 'inline-block', boxShadow: '0 0 8px #22c55e' }} />
+            <span>Green Road Line = Ambulance Preempted Green Wave</span>
           </div>
         </div>
       </div>
 
-      {/* BOTTOM CAMERA, GOOGLE MAPS LAYER, 3D BUILDINGS & GLOBE CONTROLS */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center gap-1.5 bg-slate-950/90 backdrop-blur-md border border-slate-800 px-3 py-2 rounded-2xl shadow-2xl">
-        <span className="text-[10px] font-mono text-slate-400 mr-1">CAMERA:</span>
+      {/* Bottom Camera & 2D Map Layer Controls */}
+      <div style={{
+        position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
+        background: 'rgba(2, 6, 23, 0.94)', border: '1.5px solid #334155', borderRadius: 12,
+        padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.7)'
+      }}>
+        <span style={{ fontSize: 10, color: '#64748b', marginRight: 2 }}>2D VIEW:</span>
         {[
-          { id: 'JUNCTION', label: '🚦 BRIGADE/KAMARAJ 3D' },
-          { id: 'DETOUR_OVERVIEW', label: '🗺️ CORRIDOR OVERVIEW' },
-          { id: 'FOLLOW', label: '🎯 FOLLOW AMBULANCE' },
-          { id: 'FREE', label: '🖐️ FREE PAN' },
-        ].map((c) => (
+          { id: 'OVERVIEW', label: '🗺️ CORRIDOR OVERVIEW' },
+          { id: 'FOLLOW',   label: '🎯 FOLLOW AMBULANCE' },
+          { id: 'JUNCTION', label: '🚦 BRIGADE RD SIGNAL' },
+          { id: 'FREE',     label: '🖐️ FREE PAN' },
+        ].map((cam) => (
           <button
-            key={c.id}
-            onClick={() => setCameraLock(c.id)}
-            className={`px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold transition ${
-              cameraLock === c.id
-                ? 'bg-sky-500 text-slate-950'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
-            }`}
+            key={cam.id}
+            onClick={() => setViewPreset(cam.id)}
+            style={{
+              background: cameraMode === cam.id ? '#38bdf8' : '#0f172a',
+              color: cameraMode === cam.id ? '#020617' : '#cbd5e1',
+              border: '1px solid #334155', borderRadius: 8, padding: '6px 10px',
+              fontSize: 10, fontWeight: 900, cursor: 'pointer'
+            }}
           >
-            {c.label}
+            {cam.label}
           </button>
         ))}
 
-        <div className="h-4 w-[1px] bg-slate-800 mx-1" />
-        <span className="text-[10px] font-mono text-slate-400 mr-1">GOOGLE MAPS:</span>
+        <span style={{ color: '#334155', margin: '0 2px' }}>|</span>
+        <span style={{ fontSize: 10, color: '#64748b' }}>GOOGLE 2D MAP:</span>
         {[
-          { id: 'GOOGLE_HYBRID', label: '🛰️ SATELLITE + ROADS' },
-          { id: 'GOOGLE_SATELLITE', label: '🌍 PURE SATELLITE' },
-          { id: 'GOOGLE_STREETS', label: '🗺️ GOOGLE STREETS' },
-        ].map((m) => (
+          { id: 'STREETS',   label: '🗺️ GOOGLE 2D STREETS' },
+          { id: 'HYBRID',    label: '🛰️ GOOGLE SATELLITE + ROADS' },
+          { id: 'SATELLITE', label: '🌍 PURE SATELLITE' },
+        ].map((st) => (
           <button
-            key={m.id}
-            onClick={() => setMapTheme(m.id)}
-            className={`px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold transition ${
-              mapTheme === m.id
-                ? 'bg-emerald-500 text-slate-950'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
-            }`}
+            key={st.id}
+            onClick={() => setMapStyleMode(st.id)}
+            style={{
+              background: mapStyleMode === st.id ? '#22c55e' : '#0f172a',
+              color: mapStyleMode === st.id ? '#020617' : '#cbd5e1',
+              border: '1px solid #334155', borderRadius: 8, padding: '6px 10px',
+              fontSize: 10, fontWeight: 900, cursor: 'pointer'
+            }}
           >
-            {m.label}
+            {st.label}
           </button>
         ))}
-
-        <div className="h-4 w-[1px] bg-slate-800 mx-1" />
-        <button
-          onClick={() => setBuildings3DEnabled((v) => !v)}
-          className={`px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold transition ${
-            buildings3DEnabled
-              ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30'
-              : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-          }`}
-        >
-          🏢 3D BUILDINGS: {buildings3DEnabled ? 'ON' : 'OFF'}
-        </button>
-
-        <button
-          onClick={() => setGlobeEnabled((v) => !v)}
-          className={`px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold transition ${
-            globeEnabled
-              ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30'
-              : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-          }`}
-        >
-          🌐 GLOBE: {globeEnabled ? 'ON' : 'OFF'}
-        </button>
-
-        <button
-          onClick={() => setLiveGpsActive((v) => !v)}
-          className={`px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold transition ${
-            liveGpsActive
-              ? 'bg-rose-500 text-white'
-              : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-          }`}
-        >
-          📍 {liveGpsActive ? 'DEVICE GPS ON' : 'USE DEVICE GPS'}
-        </button>
       </div>
     </div>
   );

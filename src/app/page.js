@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useV2XPublisher } from '../../hooks/useV2XSync';
+import { useV2XBroadcaster } from '../../hooks/useV2XSync';
 import { useTrafficStream } from '../../hooks/useTrafficStream';
 import { useTrafficSignal } from '../../hooks/useTrafficSignal';
 import { useCase3TrafficStream } from '../../hooks/useCase3TrafficStream';
@@ -307,15 +307,6 @@ export default function Dashboard() {
     }
   }, [selectedCase, case1Stream, case1Signal, case3]);
 
-  useV2XPublisher({
-    selectedCase,
-    vehiclesRef,
-    case1Stream,
-    case1Signal,
-    case3,
-    onRemoteCommand: handleRemoteCommand,
-  });
-
   // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
     isConnected: isSerialConnected,
@@ -344,6 +335,20 @@ export default function Dashboard() {
   } = useHardwareWifi();
 
   const [showHardwareMenu, setShowHardwareMenu] = useState(false);
+
+  // Live 20Hz V2X Telemetry Broadcaster to /ambulance and /driver dashboards
+  useV2XBroadcaster({
+    selectedCase,
+    case1Stream,
+    case1Signal,
+    case3,
+    espIp,
+    isWifiEnabled,
+    lastWifiByteSent,
+    serialLastByte,
+    isSerialConnected,
+    onRemoteCommand: handleRemoteCommand,
+  });
   const [tempIp, setTempIp] = useState(espIp);
 
   useEffect(() => {
@@ -614,30 +619,31 @@ export default function Dashboard() {
         gap: 8,
         fontFamily: 'monospace'
       }}>
+        {/* Launch 2D Google Maps Ambulance Cockpit */}
         <a
           href="/ambulance"
           target="_blank"
           rel="noopener noreferrer"
           style={{
             background: 'rgba(2, 6, 23, 0.94)',
-            color: '#10b981',
-            border: '1.5px solid #10b981',
+            color: '#22c55e',
+            border: '1.5px solid #16a34a',
             borderRadius: 8,
             padding: '7px 12px',
             fontSize: 11,
             fontWeight: 800,
             textDecoration: 'none',
-            boxShadow: '0 0 14px rgba(16, 185, 129, 0.3)',
             display: 'flex',
             alignItems: 'center',
             gap: 6,
             letterSpacing: 1,
           }}
         >
-          <span>🛰️</span>
-          <span>AMB SATELLITE MAP</span>
+          <span>🚑</span>
+          <span>2D GOOGLE MAPS COCKPIT</span>
         </a>
 
+        {/* Launch Commuter Phone Alert HUD */}
         <a
           href="/driver"
           target="_blank"
@@ -645,13 +651,12 @@ export default function Dashboard() {
           style={{
             background: 'rgba(2, 6, 23, 0.94)',
             color: '#f59e0b',
-            border: '1.5px solid #f59e0b',
+            border: '1.5px solid #d97706',
             borderRadius: 8,
             padding: '7px 12px',
             fontSize: 11,
             fontWeight: 800,
             textDecoration: 'none',
-            boxShadow: '0 0 14px rgba(245, 158, 11, 0.3)',
             display: 'flex',
             alignItems: 'center',
             gap: 6,
