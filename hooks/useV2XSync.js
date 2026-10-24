@@ -564,8 +564,26 @@ export function useV2XBroadcaster({
     };
     window.addEventListener('storage', onStorage);
 
+    // Network command polling from mobile phones
+    const cmdPollTimer = setInterval(() => {
+      fetch('/api/v2x?consumeCommands=1', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+          if (data?.commands?.length) {
+            data.commands.forEach(cmd => {
+              if (onRemoteCommand) {
+                onRemoteCommand(cmd.command, cmd.payload);
+              }
+              handleCommand({ action: cmd.command, ...cmd.payload });
+            });
+          }
+        })
+        .catch(() => {});
+    }, 250);
+
     return () => {
       bc?.close();
+      clearInterval(cmdPollTimer);
       window.removeEventListener('storage', onStorage);
     };
   }, [onRemoteCommand]);
@@ -660,6 +678,17 @@ export function useV2XBroadcaster({
         channelRef.current?.postMessage({ type: 'SEMTOS_STATE', payload });
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       } catch (_) {}
+
+      // Cross-device network broadcasting to /api/v2x for mobile phones (throttled to 10Hz)
+      if (!window.__lastV2XHttpTime || Date.now() - window.__lastV2XHttpTime >= 100) {
+        window.__lastV2XHttpTime = Date.now();
+        fetch('/api/v2x', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'SNAPSHOT', payload }),
+          cache: 'no-store'
+        }).catch(() => {});
+      }
     }, 50);
 
     return () => clearInterval(interval);
@@ -822,6 +851,21 @@ export function useV2XReceiver() {
       }
     };
     window.addEventListener('storage', onStorage);
+
+    // Poll /api/v2x for mobile phones across Wi-Fi / Hotspot
+    const netPollInterval = setInterval(() => {
+      if (Date.now() - lastExternalPacketRef.current < 350) return;
+
+      fetch('/api/v2x', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+          if (data?.ok && data.snapshot && Date.now() - (data.lastUpdated || 0) < 5000) {
+            lastExternalPacketRef.current = Date.now();
+            setState({ ...data.snapshot, isStandaloneFallback: false });
+          }
+        })
+        .catch(() => {});
+    }, 120);
 
     // Standalone 20Hz physics fallback loop when `/` is not open in another tab
     const fallbackTimer = setInterval(() => {
@@ -1011,6 +1055,14 @@ export function useV2XReceiver() {
         bc.close();
       }
       localStorage.setItem(CMD_STORAGE_KEY, JSON.stringify(cmd));
+
+      // Network dispatch for mobile phones to host
+      fetch('/api/v2x', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'COMMAND', command: action, payload: extra }),
+        cache: 'no-store'
+      }).catch(() => {});
     } catch (_) {}
 
     const s = standaloneRef.current;

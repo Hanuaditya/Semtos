@@ -335,6 +335,22 @@ export default function Dashboard() {
   } = useHardwareWifi();
 
   const [showHardwareMenu, setShowHardwareMenu] = useState(false);
+  const [showPhoneQrModal, setShowPhoneQrModal] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [networkInfo, setNetworkInfo] = useState({
+    ip: '10.157.193.41',
+    driverUrl: 'http://10.157.193.41:3000/driver',
+    ambulanceUrl: 'http://10.157.193.41:3000/ambulance',
+  });
+
+  useEffect(() => {
+    fetch('/api/network-ip')
+      .then(r => r.json())
+      .then(data => {
+        if (data?.ip) setNetworkInfo(data);
+      })
+      .catch(() => {});
+  }, []);
 
   // Live 20Hz V2X Telemetry Broadcaster to /ambulance and /driver dashboards
   useV2XBroadcaster({
@@ -643,11 +659,10 @@ export default function Dashboard() {
           <span>2D GOOGLE MAPS COCKPIT</span>
         </a>
 
-        {/* Launch Commuter Phone Alert HUD */}
-        <a
-          href="/driver"
-          target="_blank"
-          rel="noopener noreferrer"
+        {/* Launch Commuter Phone Alert HUD (Scan QR) */}
+        <button
+          onClick={() => setShowPhoneQrModal(true)}
+          title="Open Commuter HUD on your Mobile Phone via QR Code"
           style={{
             background: 'rgba(2, 6, 23, 0.94)',
             color: '#f59e0b',
@@ -656,16 +671,26 @@ export default function Dashboard() {
             padding: '7px 12px',
             fontSize: 11,
             fontWeight: 800,
-            textDecoration: 'none',
+            cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: 6,
             letterSpacing: 1,
+            boxShadow: '0 0 14px rgba(245, 158, 11, 0.35)',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'rgba(245, 158, 11, 0.18)';
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.55)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'rgba(2, 6, 23, 0.94)';
+            e.currentTarget.style.boxShadow = '0 0 14px rgba(245, 158, 11, 0.35)';
           }}
         >
           <span>📱</span>
-          <span>PHONE HUD</span>
-        </a>
+          <span>PHONE HUD [SCAN QR]</span>
+        </button>
 
         {/* USB Serial Indicator / Button */}
         {!isSerialConnected ? (
@@ -1047,6 +1072,144 @@ export default function Dashboard() {
           onBackToMenu={() => setStarted(false)}
           onSwitchCase={(caseId) => setSelectedCase(caseId)}
         />
+      )}
+      {/* ── MOBILE PHONE QR CODE MODAL ── */}
+      {showPhoneQrModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(2, 6, 23, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 200,
+          fontFamily: 'monospace'
+        }}
+        onClick={() => setShowPhoneQrModal(false)}
+        >
+          <div style={{
+            background: 'rgba(15, 23, 42, 0.96)',
+            border: '1.5px solid #f59e0b',
+            borderRadius: 16,
+            padding: '24px 28px',
+            maxWidth: 420,
+            width: '90%',
+            boxShadow: '0 0 40px rgba(245, 158, 11, 0.4)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: 14,
+            position: 'relative'
+          }}
+          onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowPhoneQrModal(false)}
+              style={{
+                position: 'absolute',
+                top: 14,
+                right: 16,
+                background: 'transparent',
+                border: 'none',
+                color: '#94a3b8',
+                fontSize: 16,
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              ✕
+            </button>
+
+            <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 800, letterSpacing: 2 }}>
+              V2X MOBILE COMMUTER COCKPIT
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: '#f8fafc' }}>
+              📱 Open HUD on Your Phone
+            </div>
+
+            {/* QR Code Canvas/Image */}
+            <div style={{
+              background: '#fff',
+              padding: 12,
+              borderRadius: 12,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&color=0-0-0&bgcolor=255-255-255&data=${encodeURIComponent(networkInfo.driverUrl)}`}
+                alt="Scan to open on phone"
+                width={190}
+                height={190}
+                style={{ display: 'block', borderRadius: 4 }}
+              />
+            </div>
+
+            {/* Direct URL Box */}
+            <div style={{ width: '100%', background: '#020617', border: '1px solid #334155', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 9, color: '#64748b', marginBottom: 2 }}>OR ENTER THIS URL ON YOUR PHONE BROWSER:</div>
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#38bdf8', wordBreak: 'break-all' }}>
+                {networkInfo.driverUrl}
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(networkInfo.driverUrl);
+                  setCopiedLink(true);
+                  setTimeout(() => setCopiedLink(false), 2000);
+                }}
+                style={{
+                  flex: 1,
+                  background: copiedLink ? '#16a34a' : '#1e293b',
+                  color: '#fff',
+                  border: '1px solid #475569',
+                  borderRadius: 8,
+                  padding: '8px 0',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                {copiedLink ? '✅ COPIED!' : '📋 COPY LINK'}
+              </button>
+              <a
+                href={networkInfo.driverUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  flex: 1,
+                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  color: '#000',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '8px 0',
+                  fontSize: 11,
+                  fontWeight: 900,
+                  textDecoration: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ↗ OPEN IN TAB
+              </a>
+            </div>
+
+            {/* Checklist */}
+            <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5, textAlign: 'left', width: '100%', background: 'rgba(30, 41, 59, 0.4)', padding: '8px 12px', borderRadius: 8 }}>
+              <div><strong>⚡ Quick Setup:</strong></div>
+              <div>1. Connect your phone to the <strong>same Wi-Fi or Mobile Hotspot</strong>.</div>
+              <div>2. Point your phone camera at the QR code above.</div>
+              <div>3. Dispatch ambulance on the laptop to trigger live siren & yield alerts!</div>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );
